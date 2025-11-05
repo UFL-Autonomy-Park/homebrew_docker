@@ -1,13 +1,15 @@
 services:
   homebrew_mavros:
     build:
-      context: .
+      context: ./mavros
     container_name: com.uflautonomypark.homebrew_mavros.homebrew_mavros
     image: com.uflautonomypark.homebrew_mavros.homebrew_mavros:0.0.1
     network_mode: host
     privileged: true
+    env_file:
+      - .env
     devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
+      - /dev/ttyFC:/dev/ttyFC
     pid: host
     platform: linux/arm64
-version: '3.7'
+
