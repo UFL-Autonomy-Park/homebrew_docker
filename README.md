@@ -33,6 +33,6 @@ docker-compose restart    # Restart
 
 ## Configuration (.env)
 - `MAVROS_NAMESPACE` - ROS namespace
-- `FCU_URL` - Device path (/dev/ttyFC:921600)
+- `FCU_URL` - Device path (`/dev/ttyFC:921600`)
 - `ROS_DOMAIN_ID` - ROS domain
-- `ROS_DISCOVERY_SERVER` - Discovery server IP:port
+- `ROS_DISCOVERY_SERVER` - Discovery server `IP:port`
