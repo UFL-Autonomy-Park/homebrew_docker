@@ -1,10 +1,31 @@
 # homebrew_docker
 Docker stack for MAVROS and Zed SDK to be used on Jetson Orin Nano with CUDA 12.2
 
+## Build ZED base image
+Clone our fork of the ZED ROS 2 wrapper
+```bash
+git clone https://github.com/UFL-Autonomy-Park/zed_ros2_wrapper_jetson.git
+cd zed_ros2_wrapper_jetson
+git switch autonomypark/humble-v5.0.0
+```
+
+Build the ROS 2 Humble, ZED SDK v5.0.0, L4T r36.3.0 base image
+```bash
+./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
+	l4t-r36.3.0 \
+	zedsdk-5.0.0
+```
+
+Make sure the image exists
+```bash
+docker image inspect zed_ros2_l4t_36.3.0_sdk_5.0.0
+```
+
+
 ## Setup
 ```bash
 # 1. Clone and configure
-git clone  && cd homebrew_docker
+git https://github.com/UFL-Autonomy-Park/homebrew_docker.git  && cd homebrew_docker
 cp .env.example .env
 # Edit .env with your settings
 
@@ -14,7 +35,8 @@ sudo ./scripts/setup-udev-fc.sh
 # Unplug/replug flight controller
 
 # 3. Run
-sudo docker-compose up -d
+sudo docker compose build
+sudo docker compose up -d
 ```
 
 ## Optional: Auto-start on boot
@@ -30,9 +52,3 @@ docker-compose down       # Stop
 docker-compose logs -f    # View logs
 docker-compose restart    # Restart
 ```
-
-## Configuration (.env)
-- `MAVROS_NAMESPACE` - ROS namespace
-- `FCU_URL` - Device path (`/dev/ttyFC:921600`)
-- `ROS_DOMAIN_ID` - ROS domain
-- `ROS_DISCOVERY_SERVER` - Discovery server `IP:port`
