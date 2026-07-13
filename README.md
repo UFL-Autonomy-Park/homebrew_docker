@@ -25,7 +25,7 @@ docker image inspect zed_ros2_l4t_36.3.0_sdk_5.0.0
 ## Setup
 ```bash
 # 1. Clone and configure
-git https://github.com/UFL-Autonomy-Park/homebrew_docker.git  && cd homebrew_docker
+git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git  && cd homebrew_docker
 cp .env.example .env
 # Edit .env with your settings
 ```
@@ -44,15 +44,17 @@ curl -fL \
   -o "config/zed/SN${ZED_SERIAL}.conf"
 ```
 
-# 2. Setup USB device (one-time)
+If you are the first person setting up the Zed, print the serial number using the label maker and attach it to the Zed so the next person does not have to do this
+
+Then, set up udev rule for the flight controller
+```bash
 sudo chmod +x /scripts/setup-udev-fc.sh
 sudo ./scripts/setup-udev-fc.sh
 # Unplug/replug flight controller
+```
 
-# 3. Get Zed config file (one-time)
-ZED_SERIAL
-
-# 3. Run
+Build the image and run the container
+```bash
 sudo docker compose build
 sudo docker compose up -d
 ```
@@ -63,10 +65,10 @@ sudo chmod +x /scripts/setup-autostart.sh
 sudo ./scripts/setup-autostart.sh
 ```
 
-## Commands
-```bash
-docker-compose up -d      # Start
-docker-compose down       # Stop
-docker-compose logs -f    # View logs
-docker-compose restart    # Restart
+## Notes
+If you are troubleshooting the flight controller and are using the Micro USB connection instead of the FTDI, change the following values in `setup-udev-fc.sh`:
+```
+VENDOR_ID="0403" -> VENDOR_ID="2dae" 
+PRODUCT_ID="6001" -> PRODUCT_ID="1016"
+SERIAL_NUM="B0040P4E" -> SERIAL_NUM="0"
 ```
