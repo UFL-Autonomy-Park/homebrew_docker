@@ -28,11 +28,29 @@ docker image inspect zed_ros2_l4t_36.3.0_sdk_5.0.0
 git https://github.com/UFL-Autonomy-Park/homebrew_docker.git  && cd homebrew_docker
 cp .env.example .env
 # Edit .env with your settings
+```
+
+Set up your Zed camera with a factory calibration file before launching. Get your serial number by plugging in the Zed to the Jetson and running
+```bash
+lsusb -v 2>/dev/null | grep -A20 -i stereolabs
+```
+
+Use the 8-digit number and run
+```bash
+mkdir -p /config/zed
+ZED_SERIAL=${YOUR_ZED_SERIAL_NUMBER}
+curl -fL \
+  "https://calib.stereolabs.com/?SN=${ZED_SERIAL}" \
+  -o "config/zed/SN${ZED_SERIAL}.conf"
+```
 
 # 2. Setup USB device (one-time)
 sudo chmod +x /scripts/setup-udev-fc.sh
 sudo ./scripts/setup-udev-fc.sh
 # Unplug/replug flight controller
+
+# 3. Get Zed config file (one-time)
+ZED_SERIAL
 
 # 3. Run
 sudo docker compose build

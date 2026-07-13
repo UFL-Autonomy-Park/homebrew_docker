@@ -14,8 +14,9 @@ services:
     network_mode: host
     ipc: host
     privileged: true
-    # volumes:
-    #   - /dev:/dev
+    volumes:
+      - /dev:/dev
+      - ./config/zed/SN${ZED_SERIAL}.conf:/usr/local/zed/settings/SN${ZED_SERIAL}.conf:ro
 
     restart: unless-stopped
     environment:
@@ -28,7 +29,7 @@ services:
       - ros2
       - launch
       - homebrew_bringup
-      - homebrew_bringup.launch.py
+      - homebrew.launch.py
       - "launch_zed:=${LAUNCH_ZED:-true}"
       - "zed_model:=${ZED_MODEL:-zed2i}"
       - "zed_camera_name:=${ZED_CAMERA_NAME:-zed}"
@@ -37,8 +38,3 @@ services:
       - "fcu_url:=${FCU_URL:-/dev/ttyFC:926100}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:-homebrew}"
       - "mavros_respawn:=${MAVROS_RESPAWN:-true}"
-
-    devices:
-      - /dev/ttyFC:/dev/ttyFC
-    # pid: host
-    # platform: linux/arm64
