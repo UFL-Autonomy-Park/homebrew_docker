@@ -3,11 +3,13 @@ set -e
 
 source "/opt/ros/${ROS_DISTRO}/install/setup.bash"
 source "/root/ros2_ws/install/setup.bash"
-source "/root/autonomy_ws/install/setup.bash"
+source "/root/homebrew_ws/install/setup.bash"
 
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 export ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}"
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
+
+FASTRTPS_PROFILE_PATH="/etc/fastdds/super_client_config.xml"
 
 # Check if discovery server
 unset ROS_DISCOVERY_SERVER

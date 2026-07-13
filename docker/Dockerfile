@@ -16,7 +16,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-mavros \
     ros-${ROS_DISTRO}-mavros-msgs \
-    ros-${ROS_DISTRO}-mavros-extras \
+    ros-${ROS_DISTRO}-mavros-extras 
 
 RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
     source "/root/ros2_ws/install/setup.bash" && \
@@ -26,7 +26,7 @@ WORKDIR /root/homebrew_ws
 
 COPY homebrew_ws/src/ src/
 
-RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
+RUN source "/opt/ros/$ROS_DISTRO/install/setup.bash" && \
     source "/root/ros2_ws/install/setup.bash" && \
     colcon build \
         --merge-install \ 
