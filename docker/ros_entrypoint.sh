@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
+source "/opt/ros/${ROS_DISTRO}/setup.bash"
 source "/opt/ros/${ROS_DISTRO}/install/setup.bash"
 source "/root/ros2_ws/install/setup.bash"
 source "/root/homebrew_ws/install/setup.bash"
