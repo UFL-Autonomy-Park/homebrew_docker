@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      network: host
       args:
         BASE_IMAGE: ${BASE_IMAGE:-zed_ros2_l4t_36.3.0_sdk_5.0.0}
 

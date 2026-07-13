@@ -7,6 +7,7 @@ ARG BASE_IMAGE=zed_ros2_l4t_36.3.0_sdk_5.0.0
 FROM ${BASE_IMAGE}
 
 ARG ROS_DISTRO=humble
+ENV ROS_DISTRO=${ROS_DISTRO}
 
 SHELL ["/bin/bash", "-c"]
 
@@ -44,9 +45,4 @@ RUN chmod 755 /sbin/homebrew_ros_entrypoint.sh
 
 ENTRYPOINT ["/sbin/homebrew_ros_entrypoint.sh"]
 
-CMD [
-    "ros2",
-    "launch",
-    "homebrew_bringup",
-    "homebrew.launch.py"
-]
+CMD ["ros2", "launch", "homebrew_bringup", "homebrew.launch.py"]
