@@ -17,6 +17,7 @@ services:
     volumes:
       - /dev:/dev
       - ./config/zed/SN${ZED_SERIAL}.conf:/usr/local/zed/settings/SN${ZED_SERIAL}.conf:ro
+      - zed_resources:/usr/local/zed/resources
 
     restart: unless-stopped
     environment:
@@ -38,3 +39,6 @@ services:
       - "fcu_url:=${FCU_URL:-/dev/ttyFC:926100}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:-homebrew}"
       - "mavros_respawn:=${MAVROS_RESPAWN:-true}"
+
+volumes:
+  zed_resources:
