@@ -22,7 +22,6 @@ services:
       ROS_LOCALHOST_ONLY: "${ROS_LOCALHOST_ONLY:-0}"
       RMW_IMPLEMENTATION: "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
       USE_DISCOVERY_SERVER: "${USE_DISCOVERY_SERVER:-false}"
-      DISCOVERY_SERVER_ADDRESS: "${DISCOVERY_SERVER_ADDRESS:-}"
 
     command:
       - ros2

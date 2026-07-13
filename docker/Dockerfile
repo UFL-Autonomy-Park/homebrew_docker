@@ -33,6 +33,10 @@ RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
         --packages-select homebrew_bringup \
         --event-handlers console_direct+
 
+# Fast DDS Discovery Server super-client profile.
+COPY config/fastdds/super_client_config.xml \
+    /etc/fastdds/super_client_config.xml
+
 COPY docker/ros_entrypoint.sh \
     /sbin/homebrew_ros_entrypoint.sh
 
