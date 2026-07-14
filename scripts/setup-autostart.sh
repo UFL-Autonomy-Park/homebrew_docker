@@ -37,7 +37,7 @@ else
 fi
 
 # Service file content
-SERVICE_FILE="/etc/systemd/system/mavros-docker.service"
+SERVICE_FILE="/etc/systemd/system/homebrew-docker.service"
 
 echo ""
 echo -e "${YELLOW}Creating systemd service file...${NC}"
@@ -45,7 +45,7 @@ echo -e "${YELLOW}Creating systemd service file...${NC}"
 # Create the service file
 sudo tee $SERVICE_FILE > /dev/null <<EOF
 [Unit]
-Description=MAVROS Docker Compose
+Description=Homebrew Docker Compose
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -72,7 +72,7 @@ sudo systemctl daemon-reload
 
 # Enable the service
 echo -e "${YELLOW}Enabling service to start on boot...${NC}"
-sudo systemctl enable mavros-docker.service
+sudo systemctl enable homebrew-docker.service
 
 echo ""
 echo -e "${GREEN}=== Setup Complete! ===${NC}"
@@ -80,18 +80,18 @@ echo ""
 echo "The service is now enabled and will start on boot."
 echo ""
 echo "Useful commands:"
-echo "  Start now:        sudo systemctl start mavros-docker.service"
-echo "  Stop:             sudo systemctl stop mavros-docker.service"
-echo "  Restart:          sudo systemctl restart mavros-docker.service"
-echo "  Check status:     sudo systemctl status mavros-docker.service"
-echo "  View logs:        sudo journalctl -u mavros-docker.service -f"
-echo "  Disable autoboot: sudo systemctl disable mavros-docker.service"
+echo "  Start now:        sudo systemctl start homebrew-docker.service"
+echo "  Stop:             sudo systemctl stop homebrew-docker.service"
+echo "  Restart:          sudo systemctl restart homebrew-docker.service"
+echo "  Check status:     sudo systemctl status homebrew-docker.service"
+echo "  View logs:        sudo journalctl -u homebrew-docker.service -f"
+echo "  Disable autoboot: sudo systemctl disable homebrew-docker.service"
 echo ""
 echo -e "${YELLOW}Would you like to start the service now? (y/n)${NC}"
 read -r response
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
     echo -e "${YELLOW}Starting service...${NC}"
-    sudo systemctl start mavros-docker.service
+    sudo systemctl start homebrew-docker.service
     sleep 2
-    sudo systemctl status mavros-docker.service
+    sudo systemctl status homebrew-docker.service
 fi
