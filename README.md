@@ -16,12 +16,6 @@ Build the ROS 2 Humble, ZED SDK v5.0.0, L4T r36.3.0 base image
 	zedsdk-5.0.0
 ```
 
-Make sure the image exists
-```bash
-docker image inspect zed_ros2_l4t_36.3.0_sdk_5.0.0
-```
-
-
 ## Setup
 ```bash
 # 1. Clone and configure
