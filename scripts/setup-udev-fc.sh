@@ -19,7 +19,7 @@ fi
 echo -e "${GREEN}=== Flight Controller udev Rule Setup ===${NC}"
 echo ""
 
-# FTDI device detected on your system
+# FTDI device info
 VENDOR_ID="0403"
 PRODUCT_ID="6001"
 SERIAL_NUM="B0040P4E"
@@ -27,14 +27,14 @@ SYMLINK_NAME="ttyFC"
 
 UDEV_RULES_FILE="/etc/udev/rules.d/99-flight-controller.rules"
 
-echo "Detected FTDI USB-Serial device:"
+echo "Device Info:"
 echo "  Vendor ID:  $VENDOR_ID"
 echo "  Product ID: $PRODUCT_ID"
 echo "  Serial:     $SERIAL_NUM"
 echo "  Symlink:    /dev/$SYMLINK_NAME"
 echo ""
 
-# Create the udev rule with serial number for extra specificity
+# Create the udev rule with serial number
 echo -e "${YELLOW}Creating udev rule...${NC}"
 cat <<EOF > $UDEV_RULES_FILE
 # Flight Controller USB Serial Device (FTDI)
@@ -50,6 +50,7 @@ echo ""
 echo -e "${YELLOW}Reloading udev rules...${NC}"
 udevadm control --reload-rules
 udevadm trigger
+udevadm settle
 
 echo ""
 echo -e "${GREEN}=== Setup Complete! ===${NC}"
