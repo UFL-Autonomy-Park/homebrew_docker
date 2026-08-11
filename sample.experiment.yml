@@ -1,0 +1,33 @@
+services:
+  your_experiment:
+    image: ufl-autonomy-park/${PLATFORM}-${MODEL}-jetson:${IMAGE_TAG:-dev}
+
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    privileged: true
+
+    volumes:
+      - /dev:/dev
+      - ./ground_ws:/root/ground_ws:ro
+      - ./experiment_ws:/root/experiment_ws
+      - ./config/fastdds/super_client_config.xml:/etc/fastdds/super_client_config.xml:ro
+
+    environment:
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      ROS_LOCALHOST_ONLY: "${ROS_LOCALHOST_ONLY:-0}"
+      RMW_IMPLEMENTATION: "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
+      USE_DISCOVERY_SERVER: "${USE_DISCOVERY_SERVER:-false}"
+      USE_EXPERIMENT_WS: "true"
+
+    depends_on:
+      - ground_bringup
+
+    restart: "no"
+
+    command:
+      - ros2
+      - launch
+      - your_experiment
+      - your_experiment.launch.py
+      - "robot_namespace:=${ROBOT_NAMESPACE}"

@@ -8,6 +8,8 @@ FROM ${BASE_IMAGE}
 
 ARG ROS_DISTRO=humble
 ENV ROS_DISTRO=${ROS_DISTRO}
+ENV HOMEBREW_WS=/root/homebrew_ws
+ENV EXPERIMENT_WS=/root/experiment_ws
 
 SHELL ["/bin/bash", "-c"]
 
@@ -23,26 +25,29 @@ RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
     source "/root/ros2_ws/install/setup.bash" && \
     ros2 run mavros install_geographiclib_datasets.sh
 
-WORKDIR /root/homebrew_ws
+RUN mkdir -p ${HOMEBREW_WS}
+RUN mkdir -p ${EXPERIMENT_WS}
 
-COPY homebrew_ws/src/ src/
 
-RUN source "/opt/ros/$ROS_DISTRO/install/setup.bash" && \
-    source "/root/ros2_ws/install/setup.bash" && \
-    colcon build \
-        --merge-install \ 
-        --packages-select homebrew_bringup \
-        --event-handlers console_direct+
+RUN mkdir -p /tmp/homebrew_ws/src
+COPY homebrew_ws/src/ tmp/homebrew_ws/src/
 
-# Fast DDS Discovery Server super-client profile.
-COPY config/fastdds/super_client_config.xml \
-    /etc/fastdds/super_client_config.xml
+# rosdep
+RUN apt-get update && \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    rosdep install \
+        --from-paths /tmp/homebrew_ws/src \
+        --ignore-src \
+        --rosdistro ${ROS_DISTRO} \
+        -r -y && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /tmp/homebrew_ws
 
 COPY docker/ros_entrypoint.sh \
     /sbin/homebrew_ros_entrypoint.sh
 
 RUN chmod 755 /sbin/homebrew_ros_entrypoint.sh
 
-ENTRYPOINT ["/sbin/homebrew_ros_entrypoint.sh"]
+WORKDIR ${HOMEBREW_WS}
 
-CMD ["ros2", "launch", "homebrew_bringup", "homebrew.launch.py"]
+ENTRYPOINT ["/sbin/homebrew_ros_entrypoint.sh"]

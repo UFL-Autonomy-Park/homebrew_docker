@@ -70,3 +70,6 @@ SERIAL_NUM="B0040P4E" -> SERIAL_NUM="0"
 When running this image for the first time, the Zed AI models will need to download. Ensure the Jetson is connected to the internet. After the models are successfully downloaded, you can run the container on LAN only. 
 
 ALWAYS DOUBLE CHECK THE DISCOVERY SERVER IP IN `/config/fastdds/super_client_config.xml`
+
+## TO-DO:
+- Add static transform publisher for Zed using Homebrew CAD file
