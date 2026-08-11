@@ -7,6 +7,70 @@ from launch.launch_description_sources import (
 )
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
+from typing import Tuple
+from launch_ros.actions import Node
+
+# Sensor mounting transforms for homebrew
+#
+# xyz:
+#   Position of sensor frame origin expressed in base_link; in meters
+#
+# rpy:
+#   Orientation of sensor frame relative to base_link; in radians
+MODEL_TRANSFORMS = {
+    "zed": {
+        "xyz": (
+            0.0,
+            0.0,
+            0.0,
+        ),
+        "rpy": (
+            0.0,
+            0.0,
+            0.0,
+        ),
+    },
+},
+
+def make_static_transform_node(
+    *,
+    node_name: str,
+    namespace,
+    parent_frame: str,
+    child_frame: str,
+    xyz: Tuple[float, float, float],
+    rpy: Tuple[float, float, float],
+    condition=None,
+) -> Node:
+
+    x, y, z = xyz
+    roll, pitch, yaw = rpy
+
+    return Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        namespace=namespace,
+        name=node_name,
+        arguments=[
+            "--x",
+            str(x),
+            "--y",
+            str(y),
+            "--z",
+            str(z),
+            "--roll",
+            str(roll),
+            "--pitch",
+            str(pitch),
+            "--yaw",
+            str(yaw),
+            "--frame-id",
+            parent_frame,
+            "--child-frame-id",
+            child_frame,
+        ],
+        condition=IfCondition(condition)
+    )
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -101,5 +165,14 @@ def generate_launch_description() -> LaunchDescription:
             ),
             zed_launch,
             mavros_launch,
+            make_static_transform_node(
+                node_name="static_zed_tf_publisher",
+                namespace=mavros_namespace,
+                parent_frame="base_link",
+                child_frame="zed_camera_link",
+                xyz=MODEL_TRANSFORMS["zed"]["xyz"],
+                rpy=MODEL_TRANSFORMS["zed"]["rpy"],
+                condition=launch_zed
+            ),
         ]
     )
