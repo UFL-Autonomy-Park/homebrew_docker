@@ -40,12 +40,34 @@ curl -fL \
 
 If you are the first person setting up the Zed, print the serial number using the label maker and attach it to the Zed so the next person does not have to do this
 
-Then, set up udev rule for the flight controller
+Then, set up udev rule for the flight controller.
+
+First, find the serial number for the FTDI cable you're using.
 ```bash
-sudo chmod +x /scripts/setup-udev-fc.sh
-sudo ./scripts/setup-udev-fc.sh
-# Unplug/replug flight controller
+lsusb -v | grep BG
 ```
+
+If it doesn't appear, find the device when running `lsusb -v`
+that gives and copy its `iSerial`
+```bash
+idVendor           0x0403 Future Technology Devices International, Ltd
+idProduct          0x6001 FT232 Serial (UART) IC
+```
+> [!WARNING]
+> Do not swap FTDI cables from another quadcopter because serial numbers are unique to each cable!
+
+Edit the udev script and paste the serial number in
+```bash
+nano scripts/setup-udev-fc.sh
+```
+
+Save and exit. Then run it.
+
+```bash
+sudo chmod +x scripts/setup-udev-fc.sh
+sudo ./scripts/setup-udev-fc.sh
+```
+As instructed by the script, unplug and replug the FTDI cable connecting to the flight controller.
 
 Build the image and run the container
 ```bash
@@ -55,7 +77,7 @@ sudo docker compose up -d
 
 ## Optional: Auto-start on boot
 ```bash
-sudo chmod +x /scripts/setup-autostart.sh
+sudo chmod +x scripts/setup-autostart.sh
 sudo ./scripts/setup-autostart.sh
 ```
 
@@ -64,7 +86,7 @@ If you are troubleshooting the flight controller and are using the Micro USB con
 ```
 VENDOR_ID="0403" -> VENDOR_ID="2dae" 
 PRODUCT_ID="6001" -> PRODUCT_ID="1016"
-SERIAL_NUM="B0040P4E" -> SERIAL_NUM="0"
+SERIAL_NUM="PLACEHOLDER" -> SERIAL_NUM="0"
 ```
 
 When running this image for the first time, the Zed AI models will need to download. Ensure the Jetson is connected to the internet. After the models are successfully downloaded, you can run the container on LAN only. 

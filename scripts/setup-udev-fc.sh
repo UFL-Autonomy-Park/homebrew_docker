@@ -22,7 +22,7 @@ echo ""
 # FTDI device info
 VENDOR_ID="0403"
 PRODUCT_ID="6001"
-SERIAL_NUM="B0040P4E"
+SERIAL_NUM="PLACEHOLDER" # <-- You must change this!
 SYMLINK_NAME="ttyFC"
 
 UDEV_RULES_FILE="/etc/udev/rules.d/99-flight-controller.rules"
