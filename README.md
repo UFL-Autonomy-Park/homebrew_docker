@@ -44,7 +44,7 @@ Then, set up udev rule for the flight controller.
 
 First, find the serial number for the FTDI cable you're using.
 ```bash
-lsusb -v | grep BG
+lsusb -v | grep -i BG
 ```
 
 If it doesn't appear, find the device when running `lsusb -v`
@@ -67,7 +67,7 @@ Save and exit. Then run it.
 sudo chmod +x scripts/setup-udev-fc.sh
 sudo ./scripts/setup-udev-fc.sh
 ```
-As instructed by the script, unplug and replug the FTDI cable connecting to the flight controller.
+If instructed by the script, unplug and replug the FTDI cable connecting to the flight controller. Otherwise, it should print `✓ Symlink /dev/ttyFC exists!`.
 
 Build the image and run the container
 ```bash
