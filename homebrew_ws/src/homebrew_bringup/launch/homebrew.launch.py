@@ -30,7 +30,7 @@ MODEL_TRANSFORMS = {
             0.0,
         ),
     },
-},
+}
 
 def make_static_transform_node(
     *,

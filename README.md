@@ -188,7 +188,7 @@ cd homebrew_ws/
 then
 
 ```bash
-colcon build --symlink-install --packages-select homebrew_bringup
+colcon build --packages-select homebrew_bringup
 ```
 
 ### 3.5 Build and run
