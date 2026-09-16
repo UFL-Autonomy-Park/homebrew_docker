@@ -209,6 +209,13 @@ after a `git pull`), re-run the `colcon build` command from 3.4 before
 
 ## 4. Optional: Auto-Start on Boot
 
+Remove any old auto-starts
+```bash
+sudo chmod +x scripts/remove-autostart.sh
+sudo ./scripts/remove-autostart.sh
+```
+
+Add yours.
 ```bash
 sudo chmod +x scripts/setup-autostart.sh
 sudo ./scripts/setup-autostart.sh
