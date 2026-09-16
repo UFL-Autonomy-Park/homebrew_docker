@@ -176,20 +176,25 @@ sudo ./scripts/setup-udev-fc.sh
 
 If instructed by the script, unplug and replug the FTDI cable connecting to the flight controller. Otherwise, it should print `✓ Symlink /dev/ttyFC exists!`.
 
-### 3.4 Build and run the homebrew_bringup package
+### 3.4 Build the homebrew_bringup package
 
 > [!WARNING]
-> Neither the Docker compose nor the Dockerfile nor the `ros_entrypoint.sh` file build the ROS 2 code that starts a MAVROS instance (thus giving you topics). This is because doing so would make the files owned by root. If you forget this, the Docker container will reboot endlessly.
+> Nothing in the Dockerfile, `docker-compose.yml`, or `ros_entrypoint.sh` builds
+> `homebrew_ws` for you. `homebrew_ws` is bind-mounted into the container so you
+> can edit and rebuild without a full image rebuild — but that means **you must
+> build it yourself, once initially and again after any change to `homebrew_ws`
+> source**, or the container will crash-loop with `homebrew_bringup` not found.
 
 ```bash
-cd homebrew_ws/
-```
-
-then
-
-```bash
+cd homebrew_ws
 colcon build --packages-select homebrew_bringup
 ```
+
+> [!WARNING]
+> Do not add `--symlink-install`. The host and the container see this same
+> directory at different absolute paths (`~/homebrew_docker/homebrew_ws` vs.
+> `/root/homebrew_ws`), and symlink-install bakes in whichever path was current
+> at build time — it'll work from one side and break from the other.
 
 ### 3.5 Build and run
 
@@ -197,6 +202,10 @@ colcon build --packages-select homebrew_bringup
 sudo docker compose build
 sudo docker compose up -d
 ```
+
+If you edit anything under `homebrew_ws/src/` after this point (including
+after a `git pull`), re-run the `colcon build` command from 3.4 before
+`docker compose up -d`, or you'll get the crash loop described above again.
 
 ## 4. Optional: Auto-Start on Boot
 
@@ -217,7 +226,12 @@ PRODUCT_ID="6001"   -> PRODUCT_ID="1016"
 SERIAL_NUM="PLACEHOLDER" -> SERIAL_NUM="0"
 ```
 
-Docker stuck in a crash loop? Try
+Docker stuck in a crash loop? Look at the logs
+```bash
+docker compose logs -f homebrew_bringup
+```
+
+Or, maybe the container is boot looping because dockerd shutdown in the middle of critical work (likely an issue with BuildKit's cache-metadata database)
 ```bash
 sudo mv /var/lib/docker/buildkit/cache.db /var/lib/docker/buildkit/cache.db.corrupt-backup
 sudo systemctl restart docker.service
