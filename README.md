@@ -179,7 +179,7 @@ If instructed by the script, unplug and replug the FTDI cable connecting to the 
 ### 3.4 Build and run the homebrew_bringup package
 
 > [!WARNING]
-> Neither the Docker compose nor the Dockerfile nor the `ros_entrypoint.sh` file build the ROS 2 code that starts a MAVROS instance (thus giving you topics). This is because doing so would make the files owned by root.
+> Neither the Docker compose nor the Dockerfile nor the `ros_entrypoint.sh` file build the ROS 2 code that starts a MAVROS instance (thus giving you topics). This is because doing so would make the files owned by root. If you forget this, the Docker container will reboot endlessly.
 
 ```bash
 cd homebrew_ws/
