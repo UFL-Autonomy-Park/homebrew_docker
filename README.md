@@ -197,6 +197,13 @@ PRODUCT_ID="6001"   -> PRODUCT_ID="1016"
 SERIAL_NUM="PLACEHOLDER" -> SERIAL_NUM="0"
 ```
 
+Docker stuck in a crash loop? Try
+```bash
+sudo mv /var/lib/docker/buildkit/cache.db /var/lib/docker/buildkit/cache.db.corrupt-backup
+sudo systemctl restart docker.service
+sudo systemctl status docker.service
+```
+
 > [!NOTE]
 > When running the image for the first time, the ZED AI models need to download. Make sure the Jetson is connected to the Internet for that first run. Once the models have downloaded successfully, the container can run with Internet.
 
