@@ -14,14 +14,22 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 
 ## 1. First-Time Jetson Setup
 
-### 1.1 Prepare the hostname
+### 1.1 Remote in to the Jetson via SSH
+
+```bash
+ssh autonomypark@192.168.XXX.XXX
+```
+
+You will need the autonomypark user password, but that will not be given here.
+
+### 1.2 Prepare the hostname
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
 sudo apt-get install nano -y
 ```
 
-### 1.2 Connect to Wi-Fi
+### 1.3 Connect to Wi-Fi
 
 Connect using whichever network applies.
 
@@ -37,7 +45,7 @@ sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$APARK_WIFI_PW"
 sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$NCR_WIFI_PW"
 ```
 
-### 1.3 Set the hostname
+### 1.4 Set the hostname
 
 Use a two-digit `$NUMBER`.
 
@@ -57,14 +65,14 @@ Reboot to apply changes:
 sudo reboot
 ```
 
-### 1.4 Update the router IP reservation
+### 1.5 Update the router IP reservation
 
 Log in to the router and fix the IP address. Log this in the IP reservations document in the Autonomy Park Google Drive.
 
 > [!IMPORTANT]
 > On the router (Ubiquiti), under Client Devices, your Jetson will flicker between its new and old hostname. Not much can be done about this — wait until the flicker stops (e.g., the next day) before fixing the local IP address. This may have been patched by Ubiquiti since this note was written.
 
-### 1.5 Docker 28+ compatibility fix
+### 1.6 Docker 28+ compatibility fix
 
 If you are using Docker 28+ (check with `apt-cache policy docker-cli`; almost certain if you ran `sudo apt upgrade`), the following is required. The Jetson's kernel cannot be upgraded with `apt` (unlike a regular Ubuntu machine) without changing JetPack versions. Do not attempt to upgrade the kernel.
 
@@ -135,9 +143,6 @@ curl -fL \
   -o "config/zed/SN${ZED_SERIAL}.conf"
 ```
 
-> [!NOTE]
-> If you are the first person setting up this ZED, print the serial number with the label maker and attach it to the camera so the next person doesn't have to repeat this step.
-
 ### 3.3 Flight controller udev rule
 
 First, find the serial number for the FTDI cable you're using:
@@ -171,7 +176,22 @@ sudo ./scripts/setup-udev-fc.sh
 
 If instructed by the script, unplug and replug the FTDI cable connecting to the flight controller. Otherwise, it should print `✓ Symlink /dev/ttyFC exists!`.
 
-### 3.4 Build and run
+### 3.4 Build and run the homebrew_bringup package
+
+> [!WARNING]
+> Neither the Docker compose nor the Dockerfile nor the `ros_entrypoint.sh` file build the ROS 2 code that starts a MAVROS instance (thus giving you topics). This is because doing so would make the files owned by root.
+
+```bash
+cd homebrew_ws/
+```
+
+then
+
+```bash
+colcon build --symlink-install --packages-select homebrew_bringup
+```
+
+### 3.5 Build and run
 
 ```bash
 sudo docker compose build
