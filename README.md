@@ -123,6 +123,16 @@ cp .env.example .env
 
 Edit `.env` with the details your Jetson needs.
 
+> [!IMPORTANT]
+> Give every vehicle on the network a unique MAVLink system ID: set the FCU's
+> `MAV_SYS_ID` (e.g. to the homebrew number) and set `MAVROS_TGT_SYSTEM` in
+> `.env` to the same value. MAVROS connects its internal router and plugins
+> over the absolute ROS topics `/uas<N>/mavlink_source` and
+> `/uas<N>/mavlink_sink`, which `MAVROS_NAMESPACE` does **not** apply to. Two
+> vehicles with the same ID will see — and command — each other's flight
+> controllers. If the IDs don't match each other, MAVROS will drop the FCU's
+> messages.
+
 ### 3.2 ZED camera calibration
 
 Set up your ZED camera with a factory calibration file before launching.

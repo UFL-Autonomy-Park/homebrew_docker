@@ -83,6 +83,7 @@ def generate_launch_description() -> LaunchDescription:
 
     fcu_url = LaunchConfiguration("fcu_url")
     mavros_namespace = LaunchConfiguration("mavros_namespace")
+    mavros_tgt_system = LaunchConfiguration("mavros_tgt_system")
     mavros_respawn = LaunchConfiguration("mavros_respawn")
 
     zed_launch = IncludeLaunchDescription(
@@ -117,6 +118,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "fcu_url": fcu_url,
             "namespace": mavros_namespace,
+            "tgt_system": mavros_tgt_system,
             "respawn_mavros": mavros_respawn,
         }.items(),
     )
@@ -157,6 +159,15 @@ def generate_launch_description() -> LaunchDescription:
                 "mavros_namespace",
                 default_value="homebrew",
                 description="MAVROS namespace",
+            ),
+            # mavros_node hardcodes its router<->plugin link topics to the
+            # absolute name /uas<tgt_system>, ignoring the namespace. Every
+            # vehicle on the network must use a unique tgt_system (matching
+            # the FCU's MAV_SYS_ID), or their MAVLink streams will mix.
+            DeclareLaunchArgument(
+                "mavros_tgt_system",
+                default_value="1",
+                description="MAVLink system ID of the FCU; must match MAV_SYS_ID",
             ),
             DeclareLaunchArgument(
                 "mavros_respawn",

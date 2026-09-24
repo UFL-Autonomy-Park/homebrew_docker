@@ -46,6 +46,7 @@ services:
       - "launch_mavros:=${LAUNCH_MAVROS:-true}"
       - "fcu_url:=${FCU_URL:-/dev/ttyFC:926100}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:-homebrew}"
+      - "mavros_tgt_system:=${MAVROS_TGT_SYSTEM:-1}"
       - "mavros_respawn:=${MAVROS_RESPAWN:-true}"
 
 volumes:
