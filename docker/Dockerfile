@@ -57,20 +57,14 @@ RUN mkdir -p ${HOMEBREW_WS}
 RUN mkdir -p ${EXPERIMENT_WS}
 
 
-RUN mkdir -p /tmp/homebrew_ws/src
-COPY homebrew_ws/src/ /tmp/homebrew_ws/src/
+# No rosdep for homebrew_ws: its dependencies are all installed explicitly
+# above or by the base image, which builds ROS itself into
+# /opt/ros/humble/install. rosdep would apt-install duplicate copies of those.
 
-# rosdep, plus iproute2 for the entrypoint's network wait
+# iproute2 for the entrypoint's network wait
 RUN apt-get update && \
     apt-get install -y --no-install-recommends iproute2 && \
-    source /opt/ros/${ROS_DISTRO}/setup.bash && \
-    rosdep install \
-        --from-paths /tmp/homebrew_ws/src \
-        --ignore-src \
-        --rosdistro ${ROS_DISTRO} \
-        -r -y && \
-    rm -rf /var/lib/apt/lists/* && \
-    rm -rf /tmp/homebrew_ws
+    rm -rf /var/lib/apt/lists/*
 
 COPY docker/ros_entrypoint.sh \
     /sbin/homebrew_ros_entrypoint.sh
