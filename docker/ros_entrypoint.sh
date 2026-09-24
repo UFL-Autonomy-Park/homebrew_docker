@@ -75,4 +75,61 @@ else
     echo "Fast DDS Discovery Server profile disabled"
 fi
 
+# Wait for the network before starting ROS.
+#
+# Fast DDS picks the network interfaces it advertises when a participant is
+# created and never re-scans. Docker's restart policy starts this container as
+# soon as dockerd is up, which on the Jetsons is often before Wi-Fi connects;
+# the nodes then advertise only unreachable addresses and are invisible to the
+# rest of the network until restarted. If no route appears within
+# NETWORK_WAIT_TIMEOUT seconds, exit non-zero so the restart policy retries.
+readonly NETWORK_WAIT_TIMEOUT="${NETWORK_WAIT_TIMEOUT:-120}"
+readonly CLOCK_WAIT_TIMEOUT="${CLOCK_WAIT_TIMEOUT:-60}"
+
+if [[ "${ROS_LOCALHOST_ONLY}" != "1" ]]; then
+    if [[ -n "${FASTRTPS_DEFAULT_PROFILES_FILE:-}" ]]; then
+        # Probe the discovery server named in the Fast DDS profile
+        network_probe_host="$(grep -oPm1 '(?<=<address>)[^<]+' "${FASTRTPS_DEFAULT_PROFILES_FILE}" || true)"
+    fi
+    # No discovery server: any default route will do (TEST-NET-1, never contacted)
+    network_probe_host="${network_probe_host:-192.0.2.1}"
+
+    # A connected UDP socket sends nothing; it only resolves the route and
+    # fails with "Network is unreachable" if there is none
+    route_source_address() {
+        python3 -c 'import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.connect((sys.argv[1], 9))
+print(s.getsockname()[0])' "$1" 2>/dev/null
+    }
+
+    echo "Waiting up to ${NETWORK_WAIT_TIMEOUT}s for a route to ${network_probe_host}..."
+    # Count elapsed time ourselves: $SECONDS follows the wall clock, which
+    # jumps decades forward when NTP syncs
+    network_waited=0
+    until source_address="$(route_source_address "${network_probe_host}")"; do
+        if (( network_waited >= NETWORK_WAIT_TIMEOUT )); then
+            echo "No route to ${network_probe_host} after ${NETWORK_WAIT_TIMEOUT}s; exiting so Docker restarts the container." >&2
+            exit 1
+        fi
+        sleep 2
+        (( network_waited += 2 ))
+    done
+    echo "Network ready: ${network_probe_host} reachable via ${source_address}"
+fi
+
+# The Jetsons have no RTC and boot at 1970 until NTP syncs. Starting before
+# then makes MAVROS reset its time sync and stamp early messages with 1970.
+# NTP may be unreachable in the field, so warn and continue instead of failing.
+readonly MIN_VALID_EPOCH=1735689600  # 2025-01-01T00:00:00Z
+clock_waited=0
+while (( $(date +%s) < MIN_VALID_EPOCH )); do
+    if (( clock_waited >= CLOCK_WAIT_TIMEOUT )); then
+        echo "Warning: system clock still unset ($(date -u)) after ${CLOCK_WAIT_TIMEOUT}s; starting anyway." >&2
+        break
+    fi
+    sleep 2
+    (( clock_waited += 2 ))
+done
+
 exec "$@"

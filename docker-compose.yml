@@ -18,6 +18,8 @@ x-homebrew-common: &homebrew-common
     RMW_IMPLEMENTATION: "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
     USE_DISCOVERY_SERVER: "${USE_DISCOVERY_SERVER:-false}"
     USE_EXPERIMENT_WS: "false"
+    NETWORK_WAIT_TIMEOUT: "${NETWORK_WAIT_TIMEOUT:-120}"
+    CLOCK_WAIT_TIMEOUT: "${CLOCK_WAIT_TIMEOUT:-60}"
 
 services:
   homebrew_bringup:

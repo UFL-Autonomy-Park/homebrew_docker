@@ -121,17 +121,9 @@ git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git && cd homebre
 cp .env.example .env
 ```
 
-Edit `.env` with the details your Jetson needs.
-
-> [!IMPORTANT]
-> Give every vehicle on the network a unique MAVLink system ID: set the FCU's
-> `MAV_SYS_ID` (e.g. to the homebrew number) and set `MAVROS_TGT_SYSTEM` in
-> `.env` to the same value. MAVROS connects its internal router and plugins
-> over the absolute ROS topics `/uas<N>/mavlink_source` and
-> `/uas<N>/mavlink_sink`, which `MAVROS_NAMESPACE` does **not** apply to. Two
-> vehicles with the same ID will see — and command — each other's flight
-> controllers. If the IDs don't match each other, MAVROS will drop the FCU's
-> messages.
+Edit `.env` with the details your Jetson needs. `MAVROS_TGT_SYSTEM` is
+covered in [3.4](#34-set-a-unique-mavlink-system-id) — do not leave it at the
+default.
 
 ### 3.2 ZED camera calibration
 
@@ -186,7 +178,51 @@ sudo ./scripts/setup-udev-fc.sh
 
 If instructed by the script, unplug and replug the FTDI cable connecting to the flight controller. Otherwise, it should print `✓ Symlink /dev/ttyFC exists!`.
 
-### 3.4 Build the homebrew_bringup package
+### 3.4 Set a unique MAVLink system ID
+
+> [!CAUTION]
+> Every vehicle on the network — homebrews, the Astro, anything else running
+> MAVROS — must have a **unique** MAVLink system ID. Otherwise vehicles receive
+> each other's telemetry *and commands* (arming, mode changes, setpoints,
+> parameter writes), even though their topics are namespaced.
+
+**Why:** `mavros_node` is a router (talks to the FCU over `/dev/ttyFC`) plus a
+UAS node (runs the plugins that publish `/<namespace>/...`). The two exchange
+raw MAVLink over the ROS topics `/uas<N>/mavlink_source` and
+`/uas<N>/mavlink_sink`, where `N` is MAVROS's `tgt_system`. MAVROS hardcodes
+these as **absolute** names, so `MAVROS_NAMESPACE` does not apply to them.
+Every vehicle left at the default `tgt_system=1` shares `/uas1` across the
+DDS network, and each vehicle's MAVROS reads and writes every vehicle's FCU.
+
+**How:** use the homebrew number (homebrew02 → 2, homebrew03 → 3, ...), and
+keep a record of which IDs are taken (the Astro needs one too).
+
+1. In QGC, set the FCU parameter `MAV_SYS_ID` to the vehicle's ID and reboot
+   the flight controller (the new ID only takes effect after a reboot).
+2. Set the same value in `.env`:
+   ```
+   MAVROS_TGT_SYSTEM=2
+   ```
+3. Recreate the container (`docker compose up -d`).
+
+The two values **must match**. If `MAVROS_TGT_SYSTEM` differs from the FCU's
+`MAV_SYS_ID`, MAVROS drops the FCU's messages and the vehicle's topics exist
+but stay silent.
+
+Verify from any machine on the network (see
+[Inspecting the ROS graph](#inspecting-the-ros-graph)):
+
+```bash
+docker compose logs homebrew_bringup | grep -E "UAS Prefix|MY ID"
+#   UAS Prefix: /uas2
+#   MAVROS UAS via /uas2 started. MY ID 2.191, TARGET ID 2.1
+ros2 topic list | grep '^/uas'
+```
+
+Each `/uas<N>` pair should have exactly one vehicle's `mavros_router` and
+`mavros` nodes on it (`ros2 topic info -v /uas2/mavlink_source`).
+
+### 3.5 Build the homebrew_bringup package
 
 > [!WARNING]
 > Nothing in the Dockerfile, `docker-compose.yml`, or `ros_entrypoint.sh` builds
@@ -206,7 +242,7 @@ colcon build --packages-select homebrew_bringup
 > `/root/homebrew_ws`), and symlink-install bakes in whichever path was current
 > at build time — it'll work from one side and break from the other.
 
-### 3.5 Build and run
+### 3.6 Build and run
 
 ```bash
 sudo docker compose build
@@ -214,7 +250,7 @@ sudo docker compose up -d
 ```
 
 If you edit anything under `homebrew_ws/src/` after this point (including
-after a `git pull`), re-run the `colcon build` command from 3.4 before
+after a `git pull`), re-run the `colcon build` command from 3.5 before
 `docker compose up -d`, or you'll get the crash loop described above again.
 
 ## 4. Optional: Auto-Start on Boot
@@ -260,6 +296,55 @@ sudo systemctl status docker.service
 
 > [!IMPORTANT]
 > Always double-check the discovery server IP in `/config/fastdds/super_client_config.xml`.
+
+### Inspecting the ROS graph
+
+Run ROS 2 commands through the container's entrypoint, which sources every
+workspace and applies the discovery server profile — a plain shell without the
+profile sees a different (partial) graph:
+
+```bash
+docker exec autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list
+```
+
+Useful commands:
+
+```bash
+ros2 topic info -v <topic>   # which nodes (and namespaces) publish/subscribe
+ros2 topic hz <topic>        # is anything actually arriving?
+ros2 param get <node> <param>
+```
+
+**One vehicle's data appears in another vehicle's topics**
+
+Check `ros2 topic info -v` on the affected topic. If it has exactly one
+publisher in the right namespace, the mixing happens upstream of ROS — look
+at the `/uas<N>` link topics. Two vehicles on the same `/uas<N>` means their
+system IDs collide; see [3.4](#34-set-a-unique-mavlink-system-id). In
+general, any topic that shows up in `ros2 topic list` outside your vehicle
+namespaces is shared by every machine on the network.
+
+**A vehicle's topics are missing after boot**
+
+Fast DDS chooses which network addresses to advertise when a node starts and
+never re-scans. If ROS starts before Wi-Fi connects, the vehicle's nodes run
+but are invisible to everything else, including `ros2` commands in its own
+container. The entrypoint prevents this by waiting up to
+`NETWORK_WAIT_TIMEOUT` seconds (default 120) for a route to the discovery
+server; if none appears it exits and Docker restarts the container. It also
+waits up to `CLOCK_WAIT_TIMEOUT` seconds (default 60) for NTP to set the
+clock, since the Jetsons boot at 1970. Check with:
+
+```bash
+docker compose logs homebrew_bringup | grep -E "Network ready|No route|clock"
+```
+
+If a vehicle's IP address changes while the container is running (e.g. its
+router reservation is missing), restart the container.
+
+> [!NOTE]
+> `docker ps` showing a container "Up 56 years" means it started before the
+> clock was set (epoch 0) and is harmless on its own.
 
 ## TO-DO:
 - Add static transform publisher for Zed using Homebrew CAD file
