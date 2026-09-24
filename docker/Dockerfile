@@ -41,12 +41,24 @@ RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
     rm -rf /tmp/mavros_src && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# ntrip_client (RTK corrections -> MAVROS gps_rtk), built from source at a
+# pinned tag, installed alongside MAVROS
+ARG NTRIP_CLIENT_VERSION=ros2-1.4.1
+RUN apt-get update && \
+    git clone --branch ${NTRIP_CLIENT_VERSION} --depth 1 https://github.com/LORD-MicroStrain/ntrip_client.git /tmp/ntrip_src/src/ntrip_client && \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    rosdep install --from-paths /tmp/ntrip_src/src --ignore-src -y && \
+    cd /tmp/ntrip_src && \
+    colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO} && \
+    rm -rf /tmp/ntrip_src && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p ${HOMEBREW_WS}
 RUN mkdir -p ${EXPERIMENT_WS}
 
 
 RUN mkdir -p /tmp/homebrew_ws/src
-COPY homebrew_ws/src/ tmp/homebrew_ws/src/
+COPY homebrew_ws/src/ /tmp/homebrew_ws/src/
 
 # rosdep, plus iproute2 for the entrypoint's network wait
 RUN apt-get update && \

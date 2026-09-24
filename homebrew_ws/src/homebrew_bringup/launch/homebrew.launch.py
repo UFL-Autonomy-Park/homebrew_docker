@@ -76,6 +76,7 @@ def make_static_transform_node(
 def generate_launch_description() -> LaunchDescription:
     launch_zed = LaunchConfiguration("launch_zed")
     launch_mavros = LaunchConfiguration("launch_mavros")
+    launch_ntrip = LaunchConfiguration("launch_ntrip")
 
     zed_model = LaunchConfiguration("zed_model")
     zed_camera_name = LaunchConfiguration("zed_camera_name")
@@ -85,6 +86,12 @@ def generate_launch_description() -> LaunchDescription:
     mavros_namespace = LaunchConfiguration("mavros_namespace")
     mavros_tgt_system = LaunchConfiguration("mavros_tgt_system")
     mavros_respawn = LaunchConfiguration("mavros_respawn")
+
+    ntrip_host = LaunchConfiguration("ntrip_host")
+    ntrip_port = LaunchConfiguration("ntrip_port")
+    ntrip_mountpoint = LaunchConfiguration("ntrip_mountpoint")
+    ntrip_username = LaunchConfiguration("ntrip_username")
+    ntrip_password = LaunchConfiguration("ntrip_password")
 
     zed_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -123,6 +130,31 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
+    # RTCM corrections from the NTRIP caster, forwarded to the FCU by MAVROS's
+    # gps_rtk plugin. Runs as its own process: if the caster is unreachable it
+    # exits and respawns without affecting MAVROS.
+    ntrip_client_node = Node(
+        package="ntrip_client",
+        executable="ntrip_ros.py",
+        name="ntrip_client",
+        namespace=mavros_namespace,
+        parameters=[
+            {
+                "host": ntrip_host,
+                "port": ntrip_port,
+                "mountpoint": ntrip_mountpoint,
+                "authenticate": True,
+                "username": ntrip_username,
+                "password": ntrip_password,
+                "rtcm_message_package": "mavros_msgs",
+            }
+        ],
+        remappings=[("rtcm", "gps_rtk/send_rtcm")],
+        respawn=True,
+        respawn_delay=10.0,
+        condition=IfCondition(launch_ntrip),
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -134,6 +166,11 @@ def generate_launch_description() -> LaunchDescription:
                 "launch_mavros",
                 default_value="false",
                 description="Launch MAVROS",
+            ),
+            DeclareLaunchArgument(
+                "launch_ntrip",
+                default_value="false",
+                description="Launch the NTRIP client for RTK corrections",
             ),
             DeclareLaunchArgument(
                 "zed_model",
@@ -152,12 +189,10 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "fcu_url",
-                default_value="/dev/ttyFC:921600",
                 description="MAVROS flight-controller URL",
             ),
             DeclareLaunchArgument(
                 "mavros_namespace",
-                default_value="homebrew",
                 description="MAVROS namespace",
             ),
             # mavros_node hardcodes its router<->plugin link topics to the
@@ -166,7 +201,6 @@ def generate_launch_description() -> LaunchDescription:
             # the FCU's MAV_SYS_ID), or their MAVLink streams will mix.
             DeclareLaunchArgument(
                 "mavros_tgt_system",
-                default_value="1",
                 description="MAVLink system ID of the FCU; must match MAV_SYS_ID",
             ),
             DeclareLaunchArgument(
@@ -174,8 +208,16 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="true",
                 description="Respawn MAVROS if it exits",
             ),
+            DeclareLaunchArgument("ntrip_host", description="NTRIP caster address"),
+            DeclareLaunchArgument(
+                "ntrip_port", default_value="2101", description="NTRIP caster port"
+            ),
+            DeclareLaunchArgument("ntrip_mountpoint", description="NTRIP mountpoint"),
+            DeclareLaunchArgument("ntrip_username", description="NTRIP username"),
+            DeclareLaunchArgument("ntrip_password", description="NTRIP password"),
             zed_launch,
             mavros_launch,
+            ntrip_client_node,
             make_static_transform_node(
                 node_name="static_zed_tf_publisher",
                 namespace=mavros_namespace,

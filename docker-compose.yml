@@ -46,10 +46,17 @@ services:
       - "zed_camera_name:=${ZED_CAMERA_NAME:-zed}"
       - "zed_namespace:=${ZED_NAMESPACE:-}"
       - "launch_mavros:=${LAUNCH_MAVROS:-true}"
-      - "fcu_url:=${FCU_URL:-/dev/ttyFC:926100}"
-      - "mavros_namespace:=${MAVROS_NAMESPACE:-homebrew}"
-      - "mavros_tgt_system:=${MAVROS_TGT_SYSTEM:-1}"
+      # Required, no fallback: a wrong value here mixes up vehicles
+      - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"
+      - "mavros_namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
+      - "mavros_tgt_system:=${MAVROS_TGT_SYSTEM:?set MAVROS_TGT_SYSTEM in .env}"
       - "mavros_respawn:=${MAVROS_RESPAWN:-true}"
+      - "launch_ntrip:=${LAUNCH_NTRIP:-true}"
+      - "ntrip_host:=${NTRIP_HOST:?set NTRIP_HOST in .env}"
+      - "ntrip_port:=${NTRIP_PORT:-2101}"
+      - "ntrip_mountpoint:=${NTRIP_MOUNTPOINT:?set NTRIP_MOUNTPOINT in .env}"
+      - "ntrip_username:=${NTRIP_USERNAME:?set NTRIP_USERNAME in .env}"
+      - "ntrip_password:=${NTRIP_PASSWORD:?set NTRIP_PASSWORD in .env}"
 
 volumes:
   zed_resources:

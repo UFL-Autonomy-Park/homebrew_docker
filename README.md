@@ -8,6 +8,7 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 - [2. Build the ZED Base Image](#2-build-the-zed-base-image)
 - [3. Configure homebrew_docker](#3-configure-homebrew_docker)
 - [4. Optional: Auto-Start on Boot](#4-optional-auto-start-on-boot)
+- [5. RTK Corrections](#5-rtk-corrections)
 - [Notes & Troubleshooting](#notes--troubleshooting)
 
 ---
@@ -121,9 +122,11 @@ git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git && cd homebre
 cp .env.example .env
 ```
 
-Edit `.env` with the details your Jetson needs. `MAVROS_TGT_SYSTEM` is
-covered in [3.4](#34-set-a-unique-mavlink-system-id) — do not leave it at the
-default.
+Edit `.env` with the details your Jetson needs. `FCU_URL`,
+`MAVROS_NAMESPACE`, `MAVROS_TGT_SYSTEM` and the `NTRIP_*` settings are
+required: `docker compose` refuses to start without them rather than guess.
+`MAVROS_TGT_SYSTEM` is covered in [3.4](#34-set-a-unique-mavlink-system-id)
+and NTRIP in [5](#5-rtk-corrections).
 
 ### 3.2 ZED camera calibration
 
@@ -266,6 +269,30 @@ Add yours.
 sudo chmod +x scripts/setup-autostart.sh
 sudo ./scripts/setup-autostart.sh
 ```
+
+## 5. RTK Corrections
+
+The container runs an NTRIP client
+([ntrip_client](https://github.com/LORD-MicroStrain/ntrip_client), pinned in
+the Dockerfile) that pulls RTCM corrections from the base station's caster
+over Wi-Fi and hands them to MAVROS (`/<namespace>/gps_rtk/send_rtcm`), which
+sends them to the FCU. No ground-station MAVProxy is needed.
+
+1. On the FCU, set `UAVCAN_PUB_RTCM` to Enabled and reboot. The Here4 is a
+   DroneCAN GPS, so PX4 must forward RTCM onto the CAN bus.
+2. Set the `NTRIP_*` values in `.env` to the caster (for the Emlid base's
+   local caster: its IP, port 2101, mountpoint, username and password).
+3. Before takeoff, check the fix:
+   ```bash
+   ros2 topic echo /<namespace>/gpsstatus/gps1/raw --field fix_type
+   ```
+   `6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
+
+The client always runs (`LAUNCH_NTRIP=true`). If the base is off or out of
+reach it logs connection errors and retries every ~10 s; MAVROS and the FCU
+are unaffected and the fix simply stays at 3/4. Set `LAUNCH_NTRIP=false` to
+silence it (e.g. indoors). Checking `fix_type` before flight is the only
+gate — nothing arms or takes off based on it.
 
 ## Notes & Troubleshooting
 
