@@ -122,9 +122,9 @@ git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git && cd homebre
 cp .env.example .env
 ```
 
-Edit `.env` with the details your Jetson needs. `FCU_URL`,
-`MAVROS_NAMESPACE`, `MAVROS_TGT_SYSTEM` and the `NTRIP_*` settings are
-required: `docker compose` refuses to start without them rather than guess.
+Edit `.env` with the details your Jetson needs. `USE_DISCOVERY_SERVER`,
+`FCU_URL`, `MAVROS_NAMESPACE`, `MAVROS_TGT_SYSTEM` and the `NTRIP_*` settings
+are required: `docker compose` refuses to start without them rather than guess.
 `MAVROS_TGT_SYSTEM` is covered in [3.4](#34-set-a-unique-mavlink-system-id)
 and NTRIP in [5](#5-rtk-corrections).
 
@@ -287,6 +287,10 @@ sends them to the FCU. No ground-station MAVProxy is needed.
    ros2 topic echo /<namespace>/gpsstatus/gps1/raw --field fix_type
    ```
    `6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
+
+The client sends the vehicle's GPS position to the caster (as GGA, from
+`global_position/raw/fix`); the Emlid local caster sends no corrections until
+it receives one, so RTK only starts once the vehicle has a normal GPS fix.
 
 The client always runs (`LAUNCH_NTRIP=true`). If the base is off or out of
 reach it logs connection errors and retries every ~10 s; MAVROS and the FCU

@@ -132,7 +132,8 @@ def generate_launch_description() -> LaunchDescription:
 
     # RTCM corrections from the NTRIP caster, forwarded to the FCU by MAVROS's
     # gps_rtk plugin. Runs as its own process: if the caster is unreachable it
-    # exits and respawns without affecting MAVROS.
+    # exits and respawns without affecting MAVROS. The client sends the
+    # vehicle's GPS fix back as GGA; the Emlid caster streams nothing without it.
     ntrip_client_node = Node(
         package="ntrip_client",
         executable="ntrip_ros.py",
@@ -149,7 +150,10 @@ def generate_launch_description() -> LaunchDescription:
                 "rtcm_message_package": "mavros_msgs",
             }
         ],
-        remappings=[("rtcm", "gps_rtk/send_rtcm")],
+        remappings=[
+            ("rtcm", "gps_rtk/send_rtcm"),
+            ("fix", "global_position/raw/fix"),
+        ],
         respawn=True,
         respawn_delay=10.0,
         condition=IfCondition(launch_ntrip),
