@@ -48,8 +48,9 @@ RUN mkdir -p ${EXPERIMENT_WS}
 RUN mkdir -p /tmp/homebrew_ws/src
 COPY homebrew_ws/src/ tmp/homebrew_ws/src/
 
-# rosdep
+# rosdep, plus iproute2 for the entrypoint's network wait
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends iproute2 && \
     source /opt/ros/${ROS_DISTRO}/setup.bash && \
     rosdep install \
         --from-paths /tmp/homebrew_ws/src \

@@ -89,7 +89,7 @@ readonly CLOCK_WAIT_TIMEOUT="${CLOCK_WAIT_TIMEOUT:-60}"
 # Count elapsed time ourselves: $SECONDS follows the wall clock, which jumps
 # decades forward when NTP syncs
 network_waited=0
-until awk '$2 == "00000000" {found=1} END {exit !found}' /proc/net/route; do
+until [[ -n "$(ip -4 route show default)" ]]; do
     if (( network_waited >= NETWORK_WAIT_TIMEOUT )); then
         echo "No default route after ${NETWORK_WAIT_TIMEOUT}s; exiting so Docker restarts the container." >&2
         exit 1
