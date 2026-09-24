@@ -330,13 +330,13 @@ Fast DDS chooses which network addresses to advertise when a node starts and
 never re-scans. If ROS starts before Wi-Fi connects, the vehicle's nodes run
 but are invisible to everything else, including `ros2` commands in its own
 container. The entrypoint prevents this by waiting up to
-`NETWORK_WAIT_TIMEOUT` seconds (default 120) for a route to the discovery
-server; if none appears it exits and Docker restarts the container. It also
+`NETWORK_WAIT_TIMEOUT` seconds (default 120) for a default route (Wi-Fi up);
+if none appears it exits and Docker restarts the container. It also
 waits up to `CLOCK_WAIT_TIMEOUT` seconds (default 60) for NTP to set the
 clock, since the Jetsons boot at 1970. Check with:
 
 ```bash
-docker compose logs homebrew_bringup | grep -E "Network ready|No route|clock"
+docker compose logs homebrew_bringup | grep -E "No default route|clock"
 ```
 
 If a vehicle's IP address changes while the container is running (e.g. its

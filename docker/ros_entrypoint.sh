@@ -81,42 +81,22 @@ fi
 # created and never re-scans. Docker's restart policy starts this container as
 # soon as dockerd is up, which on the Jetsons is often before Wi-Fi connects;
 # the nodes then advertise only unreachable addresses and are invisible to the
-# rest of the network until restarted. If no route appears within
+# rest of the network until restarted. If no default route appears within
 # NETWORK_WAIT_TIMEOUT seconds, exit non-zero so the restart policy retries.
 readonly NETWORK_WAIT_TIMEOUT="${NETWORK_WAIT_TIMEOUT:-120}"
 readonly CLOCK_WAIT_TIMEOUT="${CLOCK_WAIT_TIMEOUT:-60}"
 
-if [[ "${ROS_LOCALHOST_ONLY}" != "1" ]]; then
-    if [[ -n "${FASTRTPS_DEFAULT_PROFILES_FILE:-}" ]]; then
-        # Probe the discovery server named in the Fast DDS profile
-        network_probe_host="$(grep -oPm1 '(?<=<address>)[^<]+' "${FASTRTPS_DEFAULT_PROFILES_FILE}" || true)"
+# Count elapsed time ourselves: $SECONDS follows the wall clock, which jumps
+# decades forward when NTP syncs
+network_waited=0
+until awk '$2 == "00000000" {found=1} END {exit !found}' /proc/net/route; do
+    if (( network_waited >= NETWORK_WAIT_TIMEOUT )); then
+        echo "No default route after ${NETWORK_WAIT_TIMEOUT}s; exiting so Docker restarts the container." >&2
+        exit 1
     fi
-    # No discovery server: any default route will do (TEST-NET-1, never contacted)
-    network_probe_host="${network_probe_host:-192.0.2.1}"
-
-    # A connected UDP socket sends nothing; it only resolves the route and
-    # fails with "Network is unreachable" if there is none
-    route_source_address() {
-        python3 -c 'import socket, sys
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.connect((sys.argv[1], 9))
-print(s.getsockname()[0])' "$1" 2>/dev/null
-    }
-
-    echo "Waiting up to ${NETWORK_WAIT_TIMEOUT}s for a route to ${network_probe_host}..."
-    # Count elapsed time ourselves: $SECONDS follows the wall clock, which
-    # jumps decades forward when NTP syncs
-    network_waited=0
-    until source_address="$(route_source_address "${network_probe_host}")"; do
-        if (( network_waited >= NETWORK_WAIT_TIMEOUT )); then
-            echo "No route to ${network_probe_host} after ${NETWORK_WAIT_TIMEOUT}s; exiting so Docker restarts the container." >&2
-            exit 1
-        fi
-        sleep 2
-        (( network_waited += 2 ))
-    done
-    echo "Network ready: ${network_probe_host} reachable via ${source_address}"
-fi
+    sleep 2
+    (( network_waited += 2 ))
+done
 
 # The Jetsons have no RTC and boot at 1970 until NTP syncs. Starting before
 # then makes MAVROS reset its time sync and stamp early messages with 1970.
