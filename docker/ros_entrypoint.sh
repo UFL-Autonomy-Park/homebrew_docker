@@ -6,11 +6,6 @@ readonly EXPERIMENT_WS="${EXPERIMENT_WS:-/root/experiment_ws}"
 readonly USE_EXPERIMENT_WS="${USE_EXPERIMENT_WS:-false}"
 readonly FASTRTPS_PROFILE_PATH="/etc/fastdds/super_client_config.xml"
 
-source "/opt/ros/${ROS_DISTRO}/setup.bash"
-source "/opt/ros/${ROS_DISTRO}/install/setup.bash"
-source "/root/ros2_ws/install/setup.bash"
-source "/root/homebrew_ws/install/setup.bash"
-
 source_if_present() {
     local setup_file="$1"
 
