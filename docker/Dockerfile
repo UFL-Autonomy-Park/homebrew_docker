@@ -42,10 +42,17 @@ RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ntrip_client (RTK corrections -> MAVROS gps_rtk), built from source at a
-# pinned tag, installed alongside MAVROS
+# pinned tag, installed alongside MAVROS.
+# Patch: its 'fix' subscription is RELIABLE, which can't receive MAVROS's
+# BEST_EFFORT global_position/raw/fix, so it never sends the caster a GGA.
+# Subscribe with sensor-data QoS instead; the grep fails the build if a
+# version bump makes the sed a no-op.
 ARG NTRIP_CLIENT_VERSION=ros2-1.4.1
 RUN apt-get update && \
     git clone --branch ${NTRIP_CLIENT_VERSION} --depth 1 https://github.com/LORD-MicroStrain/ntrip_client.git /tmp/ntrip_src/src/ntrip_client && \
+    sed -i "s/'fix', self.subscribe_fix, 10)/'fix', self.subscribe_fix, rclpy.qos.qos_profile_sensor_data)/" \
+        /tmp/ntrip_src/src/ntrip_client/scripts/ntrip_ros_base.py && \
+    grep -q "subscribe_fix, rclpy.qos.qos_profile_sensor_data)" /tmp/ntrip_src/src/ntrip_client/scripts/ntrip_ros_base.py && \
     source /opt/ros/${ROS_DISTRO}/setup.bash && \
     rosdep install --from-paths /tmp/ntrip_src/src --ignore-src -y && \
     cd /tmp/ntrip_src && \
