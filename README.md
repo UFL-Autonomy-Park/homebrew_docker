@@ -294,9 +294,9 @@ it receives one, so RTK only starts once the vehicle has a normal GPS fix.
 
 **Base station (Emlid RS3+) settings.** In Emlid Flow → Base output →
 RTCM3, send the MSM messages (1074, 1084, 1094, 1124) and 1230 at **1 Hz**,
-1006 at 0.1 Hz or more. At 0.5 Hz the rovers took several minutes to go
-from float to fixed. Faster than 1 Hz gains little for time-to-fix and
-multiplies caster load and bandwidth.
+1006 at 0.1 Hz or more. Measured from a cold start, float to fixed took
+~4 min with MSM at 0.5 Hz and 15–22 s at 1 Hz. Faster than 1 Hz gains
+little for time-to-fix and multiplies caster load and bandwidth.
 
 > [!WARNING]
 > The RS3+'s local caster served at most **two** clients at once in testing:
@@ -306,10 +306,10 @@ multiplies caster load and bandwidth.
 > (e.g. SNIP, or Emlid's cloud caster) that fans the stream out, rather than
 > connecting every vehicle to the base.
 
-**Expected timing** (clear sky): RTK float within seconds of a 3D fix; RTK
-fixed after a few minutes from a cold start (power-cycling the vehicle — an
-FCU reboot alone leaves the Here4 powered and warm), or within seconds when
-warm.
+**Expected timing** (clear sky, base at 1 Hz, two vehicles on the caster):
+from power-on, 3D fix at ~60 s, RTK float within seconds of that, RTK fixed
+at ~80–90 s. An FCU reboot alone leaves the Here4 powered (warm), and it
+re-fixes within seconds.
 
 The client always runs (`LAUNCH_NTRIP=true`). If the base is off or out of
 reach it logs connection errors and retries every ~10 s; MAVROS and the FCU
