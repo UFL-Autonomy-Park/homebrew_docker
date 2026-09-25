@@ -11,7 +11,7 @@ services:
       - /dev:/dev
       - ./ground_ws:/root/ground_ws:ro
       - ./experiment_ws:/root/experiment_ws
-      - ./config/fastdds/super_client_config.xml:/etc/fastdds/super_client_config.xml:ro
+      - ./config/fastdds:/etc/fastdds:ro
 
     environment:
       ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"

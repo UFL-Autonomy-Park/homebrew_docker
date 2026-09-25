@@ -8,7 +8,7 @@ x-homebrew-common: &homebrew-common
   volumes:
     - /dev:/dev
     - ./homebrew_ws:/root/homebrew_ws
-    - ./config/fastdds/super_client_config.xml:/etc/fastdds/super_client_config.xml:ro
+    - ./config/fastdds:/etc/fastdds:ro
     - ./config/zed/SN${ZED_SERIAL}.conf:/usr/local/zed/settings/SN${ZED_SERIAL}.conf:ro
     - zed_resources:/usr/local/zed/resources
 
@@ -44,7 +44,6 @@ services:
       - "launch_zed:=${LAUNCH_ZED:-true}"
       - "zed_model:=${ZED_MODEL:-zed2i}"
       - "zed_camera_name:=${ZED_CAMERA_NAME:-zed}"
-      - "zed_namespace:=${ZED_NAMESPACE:-}"
       - "launch_mavros:=${LAUNCH_MAVROS:-true}"
       # Required, no fallback: a wrong value here mixes up vehicles
       - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"

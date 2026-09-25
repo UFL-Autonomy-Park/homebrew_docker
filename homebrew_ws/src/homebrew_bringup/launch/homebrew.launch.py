@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import (
     AnyLaunchDescriptionSource,
@@ -8,7 +8,19 @@ from launch.launch_description_sources import (
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.substitutions import FindPackageShare
 from typing import Tuple
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetRemap
+
+# Topics that nodes publish or subscribe under absolute names, which the
+# namespace does not apply to. Every vehicle would share them across the
+# network (e.g. each MAVROS would hear the other vehicles' transforms), so
+# they are remapped under the vehicle's namespace for every node launched here.
+# Check for new ones with: ros2 topic list | grep -v '^/<namespace>/'
+ABSOLUTE_TOPICS = (
+    "/tf",
+    "/tf_static",
+    "/diagnostics",
+    "/move_base_simple/goal",
+)
 
 # Sensor mounting transforms for homebrew
 #
@@ -80,7 +92,6 @@ def generate_launch_description() -> LaunchDescription:
 
     zed_model = LaunchConfiguration("zed_model")
     zed_camera_name = LaunchConfiguration("zed_camera_name")
-    zed_namespace = LaunchConfiguration("zed_namespace")
 
     fcu_url = LaunchConfiguration("fcu_url")
     mavros_namespace = LaunchConfiguration("mavros_namespace")
@@ -107,7 +118,7 @@ def generate_launch_description() -> LaunchDescription:
         launch_arguments={
             "camera_model": zed_model,
             "camera_name": zed_camera_name,
-            "namespace": zed_namespace,
+            "namespace": mavros_namespace,
         }.items(),
     )
 
@@ -187,11 +198,6 @@ def generate_launch_description() -> LaunchDescription:
                 description="ZED camera name",
             ),
             DeclareLaunchArgument(
-                "zed_namespace",
-                default_value="homebrew",
-                description="Optional ZED namespace",
-            ),
-            DeclareLaunchArgument(
                 "fcu_url",
                 description="MAVROS flight-controller URL",
             ),
@@ -219,17 +225,25 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument("ntrip_mountpoint", description="NTRIP mountpoint"),
             DeclareLaunchArgument("ntrip_username", description="NTRIP username"),
             DeclareLaunchArgument("ntrip_password", description="NTRIP password"),
-            zed_launch,
-            mavros_launch,
-            ntrip_client_node,
-            make_static_transform_node(
-                node_name="static_zed_tf_publisher",
-                namespace=mavros_namespace,
-                parent_frame="base_link",
-                child_frame="zed_camera_link",
-                xyz=MODEL_TRANSFORMS["zed"]["xyz"],
-                rpy=MODEL_TRANSFORMS["zed"]["rpy"],
-                condition=launch_zed
+            GroupAction(
+                [
+                    *(
+                        SetRemap(src=topic, dst=["/", mavros_namespace, topic])
+                        for topic in ABSOLUTE_TOPICS
+                    ),
+                    zed_launch,
+                    mavros_launch,
+                    ntrip_client_node,
+                    make_static_transform_node(
+                        node_name="static_zed_tf_publisher",
+                        namespace=mavros_namespace,
+                        parent_frame="base_link",
+                        child_frame="zed_camera_link",
+                        xyz=MODEL_TRANSFORMS["zed"]["xyz"],
+                        rpy=MODEL_TRANSFORMS["zed"]["rpy"],
+                        condition=launch_zed
+                    ),
+                ]
             ),
         ]
     )

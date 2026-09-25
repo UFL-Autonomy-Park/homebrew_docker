@@ -4,7 +4,10 @@ set -e
 readonly HOMEBREW_WS="${HOMEBREW_WS:-/root/homebrew_ws}"
 readonly EXPERIMENT_WS="${EXPERIMENT_WS:-/root/experiment_ws}"
 readonly USE_EXPERIMENT_WS="${USE_EXPERIMENT_WS:-false}"
-readonly FASTRTPS_PROFILE_PATH="/etc/fastdds/super_client_config.xml"
+# Nodes connect as plain discovery-server CLIENTs, which only receive discovery
+# data for topics they use. Debugging tools (ros2 topic list, ...) need the
+# whole graph: run them with FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml
+readonly FASTRTPS_PROFILE_PATH="${FASTRTPS_PROFILE_PATH:-/etc/fastdds/client_config.xml}"
 
 source_if_present() {
     local setup_file="$1"

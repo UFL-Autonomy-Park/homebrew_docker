@@ -292,6 +292,25 @@ The client sends the vehicle's GPS position to the caster (as GGA, from
 `global_position/raw/fix`); the Emlid local caster sends no corrections until
 it receives one, so RTK only starts once the vehicle has a normal GPS fix.
 
+**Base station (Emlid RS3+) settings.** In Emlid Flow → Base output →
+RTCM3, send the MSM messages (1074, 1084, 1094, 1124) and 1230 at **1 Hz**,
+1006 at 0.1 Hz or more. At 0.5 Hz the rovers took several minutes to go
+from float to fixed. Faster than 1 Hz gains little for time-to-fix and
+multiplies caster load and bandwidth.
+
+> [!WARNING]
+> The RS3+'s local caster served at most **two** clients at once in testing:
+> a third client (with or without GGA) received no data at all while two
+> vehicles were connected. It does not reject the extra client, so it looks
+> connected. For three or more RTK vehicles, run one NTRIP client or caster
+> (e.g. SNIP, or Emlid's cloud caster) that fans the stream out, rather than
+> connecting every vehicle to the base.
+
+**Expected timing** (clear sky): RTK float within seconds of a 3D fix; RTK
+fixed after a few minutes from a cold start (power-cycling the vehicle — an
+FCU reboot alone leaves the Here4 powered and warm), or within seconds when
+warm.
+
 The client always runs (`LAUNCH_NTRIP=true`). If the base is off or out of
 reach it logs connection errors and retries every ~10 s; MAVROS and the FCU
 are unaffected and the fix simply stays at 3/4. Set `LAUNCH_NTRIP=false` to
@@ -326,17 +345,24 @@ sudo systemctl status docker.service
 > When running the image for the first time, the ZED AI models need to download. Make sure the Jetson is connected to the Internet for that first run. Once the models have downloaded successfully, the container can run with Internet.
 
 > [!IMPORTANT]
-> Always double-check the discovery server IP in `/config/fastdds/super_client_config.xml`.
+> Always double-check the discovery server IP in both
+> `config/fastdds/client_config.xml` and `config/fastdds/super_client_config.xml`.
 
 ### Inspecting the ROS graph
 
 Run ROS 2 commands through the container's entrypoint, which sources every
-workspace and applies the discovery server profile — a plain shell without the
-profile sees a different (partial) graph:
+workspace and applies the discovery server profile, and select the
+`SUPER_CLIENT` profile. The vehicle's nodes run as plain discovery-server
+`CLIENT`s, which only receive discovery data for topics they use; a `ros2`
+command run the same way would see an almost empty graph.
 
 ```bash
-docker exec autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list
+docker exec -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list
 ```
+
+The `ros2` daemon keeps the profile it was started with. If commands see an
+empty graph, run `ros2 daemon stop` the same way and retry.
 
 Useful commands:
 
@@ -346,14 +372,45 @@ ros2 topic hz <topic>        # is anything actually arriving?
 ros2 param get <node> <param>
 ```
 
+### Multiple vehicles on one network
+
+Every vehicle's topics must live under its own namespace
+(`MAVROS_NAMESPACE`, also used for the ZED). Two things defeat namespacing,
+and both are handled:
+
+- **MAVROS's internal link** (`/uas<N>/mavlink_{source,sink}`) is keyed by
+  the system ID, not the namespace — see
+  [3.4](#34-set-a-unique-mavlink-system-id).
+- **Topics nodes use under absolute names** (`/tf`, `/tf_static`,
+  `/diagnostics`, `/move_base_simple/goal`) are remapped under the
+  namespace for every node the launch file starts (`ABSOLUTE_TOPICS` in
+  `homebrew.launch.py`). Each vehicle therefore has its own TF tree on
+  `/<namespace>/tf`; frame names (`base_link`, `map`, ...) are the same on
+  every vehicle. Tools that need TF (e.g. RViz) must remap `/tf` and
+  `/tf_static` to the vehicle's topics.
+
+Audit after adding nodes or packages: anything outside the vehicle
+namespaces other than `/rosout` and `/parameter_events` (shared by design in
+ROS 2) and `/uas<N>/*` is shared by every vehicle and must be added to
+`ABSOLUTE_TOPICS`:
+
+```bash
+ros2 topic list | grep -vE '^/homebrew[0-9]+/|^/uas[0-9]+/|^/rosout$|^/parameter_events$'
+```
+
 **One vehicle's data appears in another vehicle's topics**
 
 Check `ros2 topic info -v` on the affected topic. If it has exactly one
 publisher in the right namespace, the mixing happens upstream of ROS — look
 at the `/uas<N>` link topics. Two vehicles on the same `/uas<N>` means their
-system IDs collide; see [3.4](#34-set-a-unique-mavlink-system-id). In
-general, any topic that shows up in `ros2 topic list` outside your vehicle
-namespaces is shared by every machine on the network.
+system IDs collide; see [3.4](#34-set-a-unique-mavlink-system-id). Otherwise
+run the audit above.
+
+**Scaling to many vehicles.** Data only crosses Wi-Fi for topics something
+on another machine subscribes to, so MAVROS telemetry to a ground station
+is small; keep camera images and point clouds on the vehicle or compress
+them. RTCM is ~0.5–1 KB/s per vehicle at 1 Hz, but see the caster limit in
+[5](#5-rtk-corrections).
 
 **A vehicle's topics are missing after boot**
 
