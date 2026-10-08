@@ -183,7 +183,7 @@ If instructed by the script, unplug and replug the FTDI cable connecting to the 
 
 ### 3.4 Set a unique MAVLink system ID
 
-> [!CAUTION]
+> [!WARNING]
 > Every vehicle on the network — homebrews, the Astro, anything else running
 > MAVROS — must have a **unique** MAVLink system ID. Otherwise vehicles receive
 > each other's telemetry *and commands* (arming, mode changes, setpoints,
@@ -198,7 +198,9 @@ Every vehicle left at the default `tgt_system=1` shares `/uas1` across the
 DDS network, and each vehicle's MAVROS reads and writes every vehicle's FCU.
 
 **How:** use the homebrew number (homebrew02 → 2, homebrew03 → 3, ...), and
-keep a record of which IDs are taken (the Astro needs one too).
+keep a record of which IDs are taken. **Never use 1:** Freefly forces every
+Astro to `MAV_SYS_ID=1` and it can't be changed, so `/uas1` belongs to the
+Astros (see the astro_mavros README).
 
 1. In QGC, set the FCU parameter `MAV_SYS_ID` to the vehicle's ID and reboot
    the flight controller (the new ID only takes effect after a reboot).
