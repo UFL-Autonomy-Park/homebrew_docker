@@ -35,6 +35,9 @@ EOF
 mkdir -p /var/log/journal
 systemd-tmpfiles --create --prefix /var/log/journal
 systemctl restart systemd-journald
+# journald keeps writing to RAM (/run/log/journal) until told to flush; at
+# boot systemd-journal-flush.service does this, so do it here too.
+journalctl --flush
 
 echo -e "${YELLOW}[2/2] core dumps: systemd-coredump instead of apport...${NC}"
 apt-get install -y systemd-coredump
