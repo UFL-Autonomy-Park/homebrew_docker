@@ -10,6 +10,9 @@ from launch_ros.substitutions import FindPackageShare
 from typing import Tuple
 from launch_ros.actions import Node, SetRemap
 
+# config/mavros/ in the repo, bind-mounted read-only by docker-compose.yml
+MAVROS_CONFIG_DIR = "/etc/homebrew/mavros"
+
 # Topics that nodes publish or subscribe under absolute names, which the
 # namespace does not apply to. Every vehicle would share them across the
 # network (e.g. each MAVROS would hear the other vehicles' transforms), so
@@ -96,7 +99,7 @@ def generate_launch_description() -> LaunchDescription:
     fcu_url = LaunchConfiguration("fcu_url")
     mavros_namespace = LaunchConfiguration("mavros_namespace")
     mavros_tgt_system = LaunchConfiguration("mavros_tgt_system")
-    mavros_respawn = LaunchConfiguration("mavros_respawn")
+    mavros_plugins = LaunchConfiguration("mavros_plugins")
 
     ntrip_host = LaunchConfiguration("ntrip_host")
     ntrip_port = LaunchConfiguration("ntrip_port")
@@ -122,22 +125,41 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
+    # MAVROS does not respawn if it dies. Upstream node.launch (mavros 2.x)
+    # declares a respawn_mavros argument but never applies it to the node, so
+    # passing it did nothing; it was removed rather than left misleading.
+    # A dead MAVROS stays dead until the container or Jetson restarts.
+    #
+    # node.launch is included directly rather than px4.launch, because
+    # px4.launch hardcodes its plugin list. The other arguments match
+    # px4.launch's defaults; the plugin list comes from config/mavros/.
     mavros_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             PathJoinSubstitution(
                 [
                     FindPackageShare("mavros"),
                     "launch",
-                    "px4.launch",
+                    "node.launch",
                 ]
             )
         ),
         condition=IfCondition(launch_mavros),
         launch_arguments={
             "fcu_url": fcu_url,
-            "namespace": mavros_namespace,
+            "gcs_url": "",
             "tgt_system": mavros_tgt_system,
-            "respawn_mavros": mavros_respawn,
+            "tgt_component": "1",
+            "fcu_protocol": "v2.0",
+            "namespace": mavros_namespace,
+            "pluginlists_yaml": [
+                MAVROS_CONFIG_DIR,
+                "/",
+                mavros_plugins,
+                "_pluginlists.yaml",
+            ],
+            "config_yaml": PathJoinSubstitution(
+                [FindPackageShare("mavros"), "launch", "px4_config.yaml"]
+            ),
         }.items(),
     )
 
@@ -214,9 +236,11 @@ def generate_launch_description() -> LaunchDescription:
                 description="MAVLink system ID of the FCU; must match MAV_SYS_ID",
             ),
             DeclareLaunchArgument(
-                "mavros_respawn",
-                default_value="true",
-                description="Respawn MAVROS if it exits",
+                "mavros_plugins",
+                default_value="full",
+                choices=["full", "minimal"],
+                description="MAVROS plugin list in config/mavros/: "
+                "full (upstream PX4 default) or minimal",
             ),
             DeclareLaunchArgument("ntrip_host", description="NTRIP caster address"),
             DeclareLaunchArgument(

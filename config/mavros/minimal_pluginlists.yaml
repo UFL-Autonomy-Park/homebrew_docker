@@ -1,0 +1,44 @@
+# MAVROS plugins for the homebrew vehicles: only what autonomy_park_sitl's
+# ros2_ws uses, what RTK needs, and what those plugins depend on. Selected
+# with MAVROS_PLUGINS=minimal in .env.
+#
+# Semantics (mavros/src/lib/mavros_uas.cpp, is_plugin_allowed): a plugin that
+# matches the denylist loads only if it also matches the allowlist. Patterns
+# are fnmatch globs, case-insensitive. "*" below denies everything not listed.
+#
+# Topic/service ownership was read from a running MAVROS 2.14.0 (one ROS node
+# per plugin). Names are relative to the vehicle namespace, e.g. /homebrew03/.
+/**:
+  ros__parameters:
+    plugin_denylist:
+      - '*'
+    plugin_allowlist:
+      # state, extended_state, battery, sys_status, statustext/recv;
+      # services set_mode (OFFBOARD, AUTO.RTL, AUTO.LOITER, ...)
+      - sys_status
+      # time_reference, timesync_status. Keeps FCU time synchronised; the
+      # timesync RTT is the link-health signal used in the crash analysis.
+      - sys_time
+      # services cmd/arming, cmd/takeoff, cmd/land, cmd/command, ...
+      - command
+      # global_position/local (odometry for px4_telemetry), /global,
+      # /set_gp_origin, /raw/fix (also feeds ntrip_client's GGA)
+      - global_position
+      # home_position/home. Not used by ros2_ws directly, but global_position
+      # subscribes to it.
+      - home_position
+      # local_position/velocity_local (apark_rise_controller), /pose, /odom
+      - local_position
+      # altitude
+      - altitude
+      # imu/data, imu/data_raw, ... Supplies the attitude MAVROS uses to fill
+      # the orientation of its pose/odometry topics.
+      - imu
+      # gpsstatus/gps1/raw, gpsstatus/gps1/rtk
+      - gps_status
+      # gps_rtk/send_rtcm: RTCM from ntrip_client to the FCU (RTK)
+      - gps_rtk
+      # setpoint_raw/local (apark_rise_controller, debugging_node)
+      - setpoint_raw
+      # setpoint_velocity/cmd_vel (px4_teleop)
+      - setpoint_velocity

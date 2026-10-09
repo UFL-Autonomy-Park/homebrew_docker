@@ -9,6 +9,8 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 - [3. Configure homebrew_docker](#3-configure-homebrew_docker)
 - [4. Optional: Auto-Start on Boot](#4-optional-auto-start-on-boot)
 - [5. RTK Corrections](#5-rtk-corrections)
+- [6. Persistent Logs](#6-persistent-logs)
+- [7. MAVROS Plugin List](#7-mavros-plugin-list)
 - [Notes & Troubleshooting](#notes--troubleshooting)
 
 ---
@@ -319,7 +321,97 @@ are unaffected and the fix simply stays at 3/4. Set `LAUNCH_NTRIP=false` to
 silence it (e.g. indoors). Checking `fix_type` before flight is the only
 gate — nothing arms or takes off based on it.
 
+## 6. Persistent Logs
+
+Out of the box, every log that matters is lost sooner or later: the system
+journal lives in RAM (gone at every reboot or power loss), and the ROS logs
+live inside the container (gone whenever it is recreated, which
+`homebrew-docker.service` does on every clean shutdown via `docker compose
+down`). Three pieces fix this:
+
+| Log | Where it goes | Set up by |
+|---|---|---|
+| ROS logs (`launch.log` records node crashes; one file per node) | `logs/ros/` in this repo, on the host | `docker-compose.yml` (automatic) |
+| Container output (what `docker compose logs` shows) | the host's systemd journal | `docker-compose.yml` + the script below |
+| Kernel and system messages (USB disconnects, throttling, segfaults) | the host's systemd journal | the script below |
+| Core dumps (e.g. a MAVROS segfault) | `/var/lib/systemd/coredump/` | `docker-compose.yml` + the script below |
+
+Run this once per Jetson (it needs sudo), then recreate the container:
+
+```bash
+sudo ./scripts/setup-persistent-logs.sh
+docker compose up -d
+```
+
+Reading them:
+
+```bash
+# Container output for this boot, and the previous boot
+journalctl CONTAINER_NAME=autonomypark-homebrew -b
+journalctl CONTAINER_NAME=autonomypark-homebrew -b -1
+# Kernel messages from the previous boot (e.g. after a power loss)
+journalctl -k -b -1
+# Did a ROS node die? (launch.log is per launch, under logs/ros/<timestamp>/)
+grep -a "has died" logs/ros/*/launch.log
+# Core dumps
+coredumpctl list
+```
+
+`logs/ros/` is written by root from inside the container, so deleting old
+logs needs `sudo rm -rf logs/ros/<dir>`. It grows by a few MB per session; the
+journal is capped at 2 GB.
+
+## 7. MAVROS Plugin List
+
+MAVROS loads one plugin per MAVLink feature; the upstream PX4 default loads
+about 60, each with its own ROS node, topics, services and startup requests to
+the FCU. `MAVROS_PLUGINS` in `.env` picks a list from `config/mavros/`:
+
+- `full` (default): the upstream PX4 list, all plugins but five.
+- `minimal`: the 12 plugins that `autonomy_park_sitl`'s `ros2_ws` uses, RTK
+  needs, and those depend on. Each entry in
+  `config/mavros/minimal_pluginlists.yaml` is commented with the topics and
+  services it provides.
+
+After changing it, rebuild `homebrew_bringup` (3.5) if the launch file changed,
+then `docker compose up -d`. To check which plugins loaded:
+
+```bash
+grep -oE "Plugin [a-z_0-9]+ initialized" logs/ros/mavros_node_*.log | sort | uniq -c
+```
+
+Before adding a plugin to `minimal`, check what it depends on: for example,
+`global_position` subscribes to `home_position/home`, so `home_position` must
+stay even though nothing in `ros2_ws` uses it.
+
+References:
+- How the lists are applied (`is_plugin_allowed`): a plugin matching
+  `plugin_denylist` loads only if it also matches `plugin_allowlist`; patterns
+  are case-insensitive globs.
+  <https://github.com/mavlink/mavros/blob/ros2/mavros/src/lib/mavros_uas.cpp>
+- Upstream PX4 list: <https://github.com/mavlink/mavros/blob/ros2/mavros/launch/px4_pluginlists.yaml>
+- Plugin names: `mavros_plugins.xml` in
+  <https://github.com/mavlink/mavros/tree/ros2/mavros> and
+  <https://github.com/mavlink/mavros/tree/ros2/mavros_extras>
+- Topics per plugin (written for ROS 1; names largely carry over to ROS 2):
+  <http://wiki.ros.org/mavros#Plugins> and <http://wiki.ros.org/mavros_extras>
+
 ## Notes & Troubleshooting
+
+**MAVROS does not restart if it crashes**
+
+If `mavros_node` dies (e.g. a segfault, `exit code -11`), its topics vanish
+and stay gone until the container or Jetson is restarted. Docker's
+`restart: unless-stopped` does not help, because `ros2 launch` keeps running
+after one of its nodes dies. Earlier releases had a `MAVROS_RESPAWN` setting,
+but it never did anything: MAVROS's upstream `node.launch` accepts a
+`respawn_mavros` argument and never applies it to the node. It has been
+removed; a leftover `MAVROS_RESPAWN=` line in an old `.env` is ignored.
+To check whether MAVROS died, look in the launch log inside the container:
+
+```bash
+docker compose exec homebrew_bringup bash -c 'grep -a "mavros_node-1" /root/.ros/log/*/launch.log | grep -a "has died"'
+```
 
 **Using the Micro USB connection instead of FTDI**
 

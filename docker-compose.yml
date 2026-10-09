@@ -9,8 +9,25 @@ x-homebrew-common: &homebrew-common
     - /dev:/dev
     - ./homebrew_ws:/root/homebrew_ws
     - ./config/fastdds:/etc/fastdds:ro
+    - ./config/mavros:/etc/homebrew/mavros:ro
+    # ROS logs (incl. launch.log, which records node crashes) live on the
+    # host so they survive the container being recreated by `compose down`.
+    - ./logs/ros:/root/.ros/log
     - ./config/zed/SN${ZED_SERIAL}.conf:/usr/local/zed/settings/SN${ZED_SERIAL}.conf:ro
     - zed_resources:/usr/local/zed/resources
+
+  # Container output goes to the host's journal: with persistent journald
+  # (scripts/setup-persistent-logs.sh) it survives reboots and sits next to
+  # kernel messages. `docker compose logs` still works.
+  logging:
+    driver: journald
+    options:
+      tag: "{{.Name}}"
+
+  # Allow core dumps so a MAVROS segfault leaves something to debug; the host
+  # needs systemd-coredump to collect them (setup-persistent-logs.sh).
+  ulimits:
+    core: -1
 
   environment:
     ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
@@ -49,7 +66,7 @@ services:
       - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
       - "mavros_tgt_system:=${MAVROS_TGT_SYSTEM:?set MAVROS_TGT_SYSTEM in .env}"
-      - "mavros_respawn:=${MAVROS_RESPAWN:-true}"
+      - "mavros_plugins:=${MAVROS_PLUGINS:-full}"
       - "launch_ntrip:=${LAUNCH_NTRIP:-true}"
       - "ntrip_host:=${NTRIP_HOST:?set NTRIP_HOST in .env}"
       - "ntrip_port:=${NTRIP_PORT:-2101}"
