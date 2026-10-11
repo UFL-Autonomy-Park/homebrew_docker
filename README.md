@@ -343,6 +343,18 @@ sudo ./scripts/setup-persistent-logs.sh
 docker compose up -d
 ```
 
+The script also gives the Jetson its own **machine ID**. Jetsons flashed from
+the same image share one (`5dbfb124...` on the homebrews), so their journals
+land in identically named `/var/log/journal/<machine-id>` directories, and
+anything else that identifies the machine by it sees the same machine twice.
+Regenerating it takes two files: `systemd-machine-id-setup` copies the old ID
+back from `/var/lib/dbus/machine-id` if that file still exists, so the script
+removes both, regenerates, and makes the D-Bus file a symlink to
+`/etc/machine-id`. It only does this when the ID is still the image's, so
+re-running it is harmless. **Reboot when it says the ID changed.** Journals
+written under the old ID stay readable with
+`journalctl -D /var/log/journal/5dbfb12414a3456d9014d88183e338b1`.
+
 Reading them:
 
 ```bash
