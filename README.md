@@ -469,7 +469,7 @@ agent adds roughly 15–20 minutes to `docker compose build`.
    cat /fs/microsd/etc/extras.txt
    mkdir /fs/microsd/etc
    echo "uxrce_dds_client stop" > /fs/microsd/etc/extras.txt
-   echo "uxrce_dds_client start -t serial -d /dev/ttyS1 -b p:SER_TEL2_BAUD -n homebrew03" >> /fs/microsd/etc/extras.txt1
+   echo "uxrce_dds_client start -t serial -d /dev/ttyS1 -b p:SER_TEL2_BAUD -n homebrew03" >> /fs/microsd/etc/extras.txt
    reboot
    ```
 
