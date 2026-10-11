@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Micro XRCE-DDS Agent reference file, used when USE_DISCOVERY_SERVER=false.
+  Defines PX4's "px4_participant" (UXRCE_DDS_PTCFG=2) with ordinary multicast
+  discovery, i.e. the same participant PX4 requests with UXRCE_DDS_PTCFG=0.
+  Passed to the agent with -r by homebrew.launch.py (README section 8.1).
+-->
+<dds>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+        <participant profile_name="px4_participant">
+            <rtps>
+                <name>px4_micro_xrce_dds</name>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>

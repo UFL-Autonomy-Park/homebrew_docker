@@ -29,6 +29,11 @@ MAVROS_CONFIG_DIR = "/etc/homebrew/mavros"
 # lives here, deliberately off the system library path.
 XRCE_AGENT_PREFIX = "/opt/micro_xrce_dds_agent"
 
+# config/fastdds/ in the repo, bind-mounted read-only by docker-compose.yml.
+# The agent's participant ("px4_participant", requested by PX4 when
+# UXRCE_DDS_PTCFG=2) follows USE_DISCOVERY_SERVER like every other node.
+FASTDDS_CONFIG_DIR = "/etc/fastdds"
+
 # Topics that nodes publish or subscribe under absolute names, which the
 # namespace does not apply to. Every vehicle would share them across the
 # network (e.g. each MAVROS would hear the other vehicles' transforms), so
@@ -89,6 +94,11 @@ def make_xrce_agent(context):
             "LAUNCH_XRCE_AGENT needs a serial FCU_URL like /dev/ttyFC:921600, "
             f"got {fcu_url!r}"
         )
+    use_server = os.environ.get("USE_DISCOVERY_SERVER", "false").lower() == "true"
+    refs = os.path.join(
+        FASTDDS_CONFIG_DIR,
+        "xrce_agent_client.xml" if use_server else "xrce_agent_simple.xml",
+    )
     return [
         ExecuteProcess(
             cmd=[
@@ -98,6 +108,8 @@ def make_xrce_agent(context):
                 device,
                 "-b",
                 baud,
+                "-r",
+                refs,
             ],
             name="micro_xrce_dds_agent",
             # Only the agent's own libraries: never ROS's Fast DDS.

@@ -448,6 +448,18 @@ firmware's message definitions; if the firmware is upgraded, bump
 `PX4_MSGS_VERSION` in `docker/Dockerfile` and rebuild the image. Building the
 agent adds roughly 15–20 minutes to `docker compose build`.
 
+Measured on homebrew02/03 (outdoors, 20 container restarts per bridge per
+vehicle; PX4 v1.16.2 stock topic list):
+
+| Median | MAVROS (`minimal`) | XRCE agent |
+|---|---|---|
+| Bridge CPU / memory | 29 % of a core / 202 MB | 4 % / 27 MB |
+| Odometry delivered | 30 Hz | ~95–100 Hz |
+| Odometry age: median / max | 4.0 / 39 ms | 9.2 / 21 ms |
+| Link round trip (timesync) | 2.2 ms | 8.8 ms |
+| Container start → first odometry | 4.6 s | 9.5 s |
+| RTK | yes | no ([8.2](#82-rtk-with-the-xrce-agent)) |
+
 ### 8.1 Switch a vehicle to the XRCE agent
 
 1. **FCU parameters** (QGroundControl → Vehicle Setup → Parameters), then reboot:
@@ -458,6 +470,7 @@ agent adds roughly 15–20 minutes to `docker compose build`.
    | `UXRCE_DDS_CFG` | `Disabled` | `TELEM 2` |
    | `SER_TEL2_BAUD` | 921600 | 921600 (unchanged) |
    | `UXRCE_DDS_DOM_ID` | — | `0` (must equal `ROS_DOMAIN_ID`) |
+   | `UXRCE_DDS_PTCFG` | — | `Custom participant` (2) |
 
 2. **Namespace.** PX4 v1.16 has no parameter for it, so without this step
    every vehicle publishes the same `/fmu/out/...` topics and they mix on the
@@ -481,16 +494,37 @@ agent adds roughly 15–20 minutes to `docker compose build`.
 3. **`.env`** on the Jetson: `LAUNCH_MAVROS=false`, `LAUNCH_XRCE_AGENT=true`,
    then `docker compose up -d`.
 
-4. **Check** that topics arrive (the image's `ros2` CLI, as in
+4. **Check** that the session is up and the topics carry your namespace
+   (the image's `ros2` CLI with the super-client profile, as in
    [Inspecting the ROS graph](#inspecting-the-ros-graph)):
 
    ```bash
+   journalctl CONTAINER_NAME=autonomypark-homebrew -b | grep -i "session established"
    docker exec -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
      autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list | grep fmu
-   journalctl CONTAINER_NAME=autonomypark-homebrew -b | grep -i "session established"
    ```
 
-To switch back: reverse the parameter table, delete the two lines from
+   Expect `/<namespace>/fmu/out/...` and `/<namespace>/fmu/in/...` (51 topics
+   with v1.16.2). Right after the agent starts, PX4's client typically
+   establishes its session three times within ~20 s before it settles.
+
+> [!NOTE]
+> **Discovery.** With `UXRCE_DDS_PTCFG = Custom participant`, PX4's client
+> asks the agent for a DDS participant named `px4_participant` instead of
+> sending its own definition. The launch file passes the agent a reference
+> file (`-r`) that defines it to match `USE_DISCOVERY_SERVER`:
+> `config/fastdds/xrce_agent_client.xml` (discovery-server client; keep its
+> server address in sync with `client_config.xml`) or
+> `config/fastdds/xrce_agent_simple.xml` (ordinary multicast discovery).
+> With `UXRCE_DDS_PTCFG = Default` (0) the reference file is ignored and the
+> agent always uses multicast discovery, so its topics are invisible to
+> discovery-server clients.
+>
+> The agent bundles its own Fast DDS (2.14), separate from ROS 2 Humble's
+> (2.6); both speak standard RTPS to the discovery server.
+
+To switch back: reverse the parameter table (`UXRCE_DDS_PTCFG` back to
+`Default`), delete the two lines from
 `extras.txt` (or the file, `rm /fs/microsd/etc/extras.txt`, if you created
 it), reboot the FCU, and set `LAUNCH_MAVROS=true`, `LAUNCH_XRCE_AGENT=false`.
 

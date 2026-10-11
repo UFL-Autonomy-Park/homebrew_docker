@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!--
+  Micro XRCE-DDS Agent reference file, used when USE_DISCOVERY_SERVER=true.
+  With UXRCE_DDS_PTCFG=2 (Custom) PX4's client asks the agent for a participant
+  named "px4_participant"; this defines it as a discovery-server CLIENT, so the
+  /<namespace>/fmu/... topics register with the server like every other node.
+  Keep the server prefix and address in sync with client_config.xml.
+  Passed to the agent with -r by homebrew.launch.py (README section 8.1).
+-->
+<dds>
+    <profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+        <participant profile_name="px4_participant">
+            <rtps>
+                <name>px4_micro_xrce_dds</name>
+                <builtin>
+                    <discovery_config>
+                        <discoveryProtocol>CLIENT</discoveryProtocol>
+                        <discoveryServersList>
+                            <RemoteServer prefix="44.53.00.5f.45.50.52.4f.53.49.4d.41">
+                                <metatrafficUnicastLocatorList>
+                                    <locator>
+                                        <udpv4>
+                                            <address>192.168.1.201</address>
+                                            <port>11811</port>
+                                        </udpv4>
+                                    </locator>
+                                </metatrafficUnicastLocatorList>
+                            </RemoteServer>
+                        </discoveryServersList>
+                    </discovery_config>
+                </builtin>
+            </rtps>
+        </participant>
+    </profiles>
+</dds>
