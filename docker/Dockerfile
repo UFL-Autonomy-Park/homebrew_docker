@@ -60,6 +60,33 @@ RUN apt-get update && \
     rm -rf /tmp/ntrip_src && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# px4_msgs, pinned to the PX4 release the vehicles' flight controllers run.
+# uXRCE-DDS topics only deserialize if these definitions match the firmware's.
+ARG PX4_MSGS_VERSION=v1.16.2
+RUN git clone --branch ${PX4_MSGS_VERSION} --depth 1 https://github.com/PX4/px4_msgs.git /tmp/px4_msgs_src/src/px4_msgs && \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    cd /tmp/px4_msgs_src && \
+    colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO} && \
+    rm -rf /tmp/px4_msgs_src
+
+# Micro XRCE-DDS Agent (LAUNCH_XRCE_AGENT), the uXRCE-DDS alternative to
+# MAVROS. Pinned to v2.4.3: do not change. Its superbuild bundles its own
+# Fast DDS 2.14 / Fast CDR 2.2, which must not shadow ROS 2's copies, so it is
+# installed under its own prefix, not added to the system library path, and
+# the launch file runs it with LD_LIBRARY_PATH set to that prefix only. The
+# ldd check fails the build if anything resolves outside it.
+ARG XRCE_AGENT_VERSION=v2.4.3
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libasio-dev libtinyxml2-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    git clone --branch ${XRCE_AGENT_VERSION} --depth 1 https://github.com/eProsima/Micro-XRCE-DDS-Agent.git /tmp/xrce_agent && \
+    cmake -S /tmp/xrce_agent -B /tmp/xrce_agent/build \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/micro_xrce_dds_agent && \
+    cmake --build /tmp/xrce_agent/build -j"$(nproc)" && \
+    cmake --install /tmp/xrce_agent/build && \
+    rm -rf /tmp/xrce_agent && \
+    ! LD_LIBRARY_PATH=/opt/micro_xrce_dds_agent/lib ldd /opt/micro_xrce_dds_agent/bin/MicroXRCEAgent | grep -E "not found|/opt/ros"
+
 RUN mkdir -p ${HOMEBREW_WS}
 RUN mkdir -p ${EXPERIMENT_WS}
 

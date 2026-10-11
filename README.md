@@ -11,6 +11,7 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 - [5. RTK Corrections](#5-rtk-corrections)
 - [6. Persistent Logs](#6-persistent-logs)
 - [7. MAVROS Plugin List](#7-mavros-plugin-list)
+- [8. Flight-Controller Bridge: MAVROS or Micro XRCE-DDS Agent](#8-flight-controller-bridge-mavros-or-micro-xrce-dds-agent)
 - [Notes & Troubleshooting](#notes--troubleshooting)
 
 ---
@@ -251,6 +252,13 @@ colcon build --packages-select homebrew_bringup
 
 ### 3.6 Build and run
 
+Once per Jetson, before the first `up`, set up persistent logs and a unique
+machine ID ([6](#6-persistent-logs)); reboot if the script says so:
+
+```bash
+sudo ./scripts/setup-persistent-logs.sh
+```
+
 ```bash
 sudo docker compose build
 sudo docker compose up -d
@@ -323,11 +331,11 @@ gate — nothing arms or takes off based on it.
 
 ## 6. Persistent Logs
 
-Out of the box, every log that matters is lost sooner or later: the system
-journal lives in RAM (gone at every reboot or power loss), and the ROS logs
-live inside the container (gone whenever it is recreated, which
+Without this setup, every log that matters is lost sooner or later: the
+Jetson's system journal lives in RAM (gone at every reboot or power loss), and
+ROS logs written inside the container are gone whenever it is recreated, which
 `homebrew-docker.service` does on every clean shutdown via `docker compose
-down`). Three pieces fix this:
+down`. Three pieces fix this:
 
 | Log | Where it goes | Set up by |
 |---|---|---|
@@ -385,6 +393,14 @@ the FCU. `MAVROS_PLUGINS` in `.env` picks a list from `config/mavros/`:
   `config/mavros/minimal_pluginlists.yaml` is commented with the topics and
   services it provides.
 
+Measured on homebrew02 and homebrew03 (20 restarts each, alternating; bench,
+FCU connected): with `full`, every start produced a 184–648 ms companion-link
+backlog ("TM: RTT too high" warnings) and MAVROS used ~1 CPU core; with
+`minimal`, the timesync RTT never exceeded ~10 ms, there were no warnings, and
+MAVROS used ~0.26 of a core. Before flying on `minimal`, confirm outdoors with
+an RTK fix that `global_position/local`, `global_position/global` and RTK
+corrections (`gpsstatus/gps1/raw` reaching fix type 6) all work.
+
 After changing it, rebuild `homebrew_bringup` (3.5) if the launch file changed,
 then `docker compose up -d`. To check which plugins loaded:
 
@@ -408,6 +424,87 @@ References:
 - Topics per plugin (written for ROS 1; names largely carry over to ROS 2):
   <http://wiki.ros.org/mavros#Plugins> and <http://wiki.ros.org/mavros_extras>
 
+## 8. Flight-Controller Bridge: MAVROS or Micro XRCE-DDS Agent
+
+The Jetson can talk to the flight controller in one of two ways:
+
+| | MAVROS (default) | Micro XRCE-DDS Agent |
+|---|---|---|
+| Protocol on TELEM2 | MAVLink | uXRCE-DDS (PX4's native DDS bridge) |
+| ROS interface | `mavros_msgs`, `/<namespace>/...` topics and services | `px4_msgs`, `/<namespace>/fmu/out/...` and `/fmu/in/...` topics |
+| Topics | chosen by `MAVROS_PLUGINS` ([7](#7-mavros-plugin-list)) | fixed by the PX4 firmware's built-in list (v1.16.2: 24 out, 27 in) |
+| RTK corrections | NTRIP client → MAVROS → FCU | **none** (see below) |
+| Used by `autonomy_park_sitl` | yes | no |
+
+> [!IMPORTANT]
+> **Enable exactly one.** Both use the same serial port (`FCU_URL`). The
+> launch file refuses to start if `LAUNCH_MAVROS` and `LAUNCH_XRCE_AGENT` are
+> both `true`, and the container restart-loops with that error in its log.
+> The FCU's TELEM2 must be configured for the same choice.
+
+The image includes the agent pinned at **v2.4.3** and `px4_msgs` pinned at
+**v1.16.2**, matching the vehicles' PX4 firmware. `px4_msgs` must match the
+firmware's message definitions; if the firmware is upgraded, bump
+`PX4_MSGS_VERSION` in `docker/Dockerfile` and rebuild the image. Building the
+agent adds roughly 15–20 minutes to `docker compose build`.
+
+### 8.1 Switch a vehicle to the XRCE agent
+
+1. **FCU parameters** (QGroundControl → Vehicle Setup → Parameters), then reboot:
+
+   | Parameter | MAVROS | XRCE agent |
+   |---|---|---|
+   | `MAV_1_CONFIG` | `TELEM 2` | `Disabled` |
+   | `UXRCE_DDS_CFG` | `Disabled` | `TELEM 2` |
+   | `SER_TEL2_BAUD` | 921600 | 921600 (unchanged) |
+   | `UXRCE_DDS_DOM_ID` | — | `0` (must equal `ROS_DOMAIN_ID`) |
+
+2. **Namespace.** PX4 v1.16 has no parameter for it, so without this step
+   every vehicle publishes the same `/fmu/out/...` topics and they mix on the
+   network. Set it with the client's `-n` option in the SD card's startup
+   file. In QGroundControl → Analyze Tools → MAVLink Console (use your
+   vehicle's namespace):
+
+   ```
+   cat /fs/microsd/etc/extras.txt
+   mkdir /fs/microsd/etc
+   echo "uxrce_dds_client stop" > /fs/microsd/etc/extras.txt
+   echo "uxrce_dds_client start -t serial -d /dev/ttyS1 -b p:SER_TEL2_BAUD -n homebrew03" >> /fs/microsd/etc/extras.txt1
+   reboot
+   ```
+
+   The first `cat` shows whether an `extras.txt` already exists; if it does,
+   append the two lines to it instead of overwriting. `/dev/ttyS1` is TELEM2
+   on the CubeOrange. After the reboot, `uxrce_dds_client status` should show
+   it running on `/dev/ttyS1`.
+
+3. **`.env`** on the Jetson: `LAUNCH_MAVROS=false`, `LAUNCH_XRCE_AGENT=true`,
+   then `docker compose up -d`.
+
+4. **Check** that topics arrive (the image's `ros2` CLI, as in
+   [Inspecting the ROS graph](#inspecting-the-ros-graph)):
+
+   ```bash
+   docker exec -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+     autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list | grep fmu
+   journalctl CONTAINER_NAME=autonomypark-homebrew -b | grep -i "session established"
+   ```
+
+To switch back: reverse the parameter table, delete the two lines from
+`extras.txt` (or the file, `rm /fs/microsd/etc/extras.txt`, if you created
+it), reboot the FCU, and set `LAUNCH_MAVROS=true`, `LAUNCH_XRCE_AGENT=false`.
+
+### 8.2 RTK with the XRCE agent
+
+PX4 receives RTK corrections as MAVLink `GPS_RTCM_DATA`. Its v1.16 uXRCE-DDS
+topic list has no input for them, so with the agent the NTRIP client has
+nowhere to send corrections; the launch file does not start it, and the GPS
+stays at a 3D fix. Options that need no firmware change: QGroundControl's
+built-in NTRIP client (corrections go over the telemetry radio while QGC is
+connected), or a second MAVLink link from the Jetson to the FCU's USB port
+carrying only corrections (e.g. MAVProxy's `ntrip` module). Neither is set up
+here.
+
 ## Notes & Troubleshooting
 
 **MAVROS does not restart if it crashes**
@@ -419,10 +516,12 @@ after one of its nodes dies. Earlier releases had a `MAVROS_RESPAWN` setting,
 but it never did anything: MAVROS's upstream `node.launch` accepts a
 `respawn_mavros` argument and never applies it to the node. It has been
 removed; a leftover `MAVROS_RESPAWN=` line in an old `.env` is ignored.
-To check whether MAVROS died, look in the launch log inside the container:
+To check whether MAVROS died, look in the launch logs (on the host since
+[6](#6-persistent-logs)), and for a core dump:
 
 ```bash
-docker compose exec homebrew_bringup bash -c 'grep -a "mavros_node-1" /root/.ros/log/*/launch.log | grep -a "has died"'
+grep -a "mavros_node-1" logs/ros/*/launch.log | grep -a "has died"
+coredumpctl list
 ```
 
 **Using the Micro USB connection instead of FTDI**

@@ -61,7 +61,9 @@ services:
       - "launch_zed:=${LAUNCH_ZED:-true}"
       - "zed_model:=${ZED_MODEL:-zed2i}"
       - "zed_camera_name:=${ZED_CAMERA_NAME:-zed}"
+      # Exactly one of these two may be true (the launch refuses both)
       - "launch_mavros:=${LAUNCH_MAVROS:-true}"
+      - "launch_xrce_agent:=${LAUNCH_XRCE_AGENT:-false}"
       # Required, no fallback: a wrong value here mixes up vehicles
       - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"

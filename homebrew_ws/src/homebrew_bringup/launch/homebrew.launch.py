@@ -1,17 +1,33 @@
+import os
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    GroupAction,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import (
     AnyLaunchDescriptionSource,
     PythonLaunchDescriptionSource,
 )
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    LaunchConfiguration,
+    PathJoinSubstitution,
+    PythonExpression,
+)
 from launch_ros.substitutions import FindPackageShare
 from typing import Tuple
 from launch_ros.actions import Node, SetRemap
 
 # config/mavros/ in the repo, bind-mounted read-only by docker-compose.yml
 MAVROS_CONFIG_DIR = "/etc/homebrew/mavros"
+
+# Micro XRCE-DDS Agent install prefix (docker/Dockerfile). Its bundled Fast DDS
+# lives here, deliberately off the system library path.
+XRCE_AGENT_PREFIX = "/opt/micro_xrce_dds_agent"
 
 # Topics that nodes publish or subscribe under absolute names, which the
 # namespace does not apply to. Every vehicle would share them across the
@@ -46,6 +62,52 @@ MODEL_TRANSFORMS = {
         ),
     },
 }
+
+def _is_true(context, name: str) -> bool:
+    return LaunchConfiguration(name).perform(context).strip().lower() == "true"
+
+
+def check_one_bridge(context):
+    """MAVROS and the agent both need the FCU's serial port: allow only one."""
+    if _is_true(context, "launch_mavros") and _is_true(context, "launch_xrce_agent"):
+        raise RuntimeError(
+            "LAUNCH_MAVROS and LAUNCH_XRCE_AGENT are both true. Both use the "
+            "flight controller's serial port; enable exactly one "
+            "(README section 8)."
+        )
+    return []
+
+
+def make_xrce_agent(context):
+    """Micro XRCE-DDS Agent on the same serial port and baud as FCU_URL."""
+    if not _is_true(context, "launch_xrce_agent"):
+        return []
+    fcu_url = LaunchConfiguration("fcu_url").perform(context)
+    device, _, baud = fcu_url.partition(":")
+    if not device.startswith("/dev/") or not baud.isdigit():
+        raise RuntimeError(
+            "LAUNCH_XRCE_AGENT needs a serial FCU_URL like /dev/ttyFC:921600, "
+            f"got {fcu_url!r}"
+        )
+    return [
+        ExecuteProcess(
+            cmd=[
+                os.path.join(XRCE_AGENT_PREFIX, "bin", "MicroXRCEAgent"),
+                "serial",
+                "--dev",
+                device,
+                "-b",
+                baud,
+            ],
+            name="micro_xrce_dds_agent",
+            # Only the agent's own libraries: never ROS's Fast DDS.
+            additional_env={
+                "LD_LIBRARY_PATH": os.path.join(XRCE_AGENT_PREFIX, "lib")
+            },
+            output="screen",
+        )
+    ]
+
 
 def make_static_transform_node(
     *,
@@ -92,6 +154,7 @@ def generate_launch_description() -> LaunchDescription:
     launch_zed = LaunchConfiguration("launch_zed")
     launch_mavros = LaunchConfiguration("launch_mavros")
     launch_ntrip = LaunchConfiguration("launch_ntrip")
+    launch_xrce_agent = LaunchConfiguration("launch_xrce_agent")
 
     zed_model = LaunchConfiguration("zed_model")
     zed_camera_name = LaunchConfiguration("zed_camera_name")
@@ -167,6 +230,7 @@ def generate_launch_description() -> LaunchDescription:
     # gps_rtk plugin. Runs as its own process: if the caster is unreachable it
     # exits and respawns without affecting MAVROS. The client sends the
     # vehicle's GPS fix back as GGA; the Emlid caster streams nothing without it.
+    # Only runs with MAVROS: nothing else forwards its corrections to the FCU.
     ntrip_client_node = Node(
         package="ntrip_client",
         executable="ntrip_ros.py",
@@ -189,7 +253,14 @@ def generate_launch_description() -> LaunchDescription:
         ],
         respawn=True,
         respawn_delay=10.0,
-        condition=IfCondition(launch_ntrip),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'", launch_ntrip, "'.lower() == 'true' and '",
+                    launch_mavros, "'.lower() == 'true'",
+                ]
+            )
+        ),
     )
 
     return LaunchDescription(
@@ -203,6 +274,12 @@ def generate_launch_description() -> LaunchDescription:
                 "launch_mavros",
                 default_value="false",
                 description="Launch MAVROS",
+            ),
+            DeclareLaunchArgument(
+                "launch_xrce_agent",
+                default_value="false",
+                description="Launch the Micro XRCE-DDS Agent instead of MAVROS "
+                "(never both)",
             ),
             DeclareLaunchArgument(
                 "launch_ntrip",
@@ -255,8 +332,10 @@ def generate_launch_description() -> LaunchDescription:
                         SetRemap(src=topic, dst=["/", mavros_namespace, topic])
                         for topic in ABSOLUTE_TOPICS
                     ),
+                    OpaqueFunction(function=check_one_bridge),
                     zed_launch,
                     mavros_launch,
+                    OpaqueFunction(function=make_xrce_agent),
                     ntrip_client_node,
                     make_static_transform_node(
                         node_name="static_zed_tf_publisher",
