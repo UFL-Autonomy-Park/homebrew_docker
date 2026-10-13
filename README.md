@@ -109,7 +109,7 @@ git switch autonomypark/humble-v5.0.0
 Build the ROS 2 Humble, ZED SDK v5.0.0, L4T r36.3.0 base image:
 
 ```bash
-./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
+sudo ./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
 	l4t-r36.3.0 \
 	zedsdk-5.0.0
 ```
