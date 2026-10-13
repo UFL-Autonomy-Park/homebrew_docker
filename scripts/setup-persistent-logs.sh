@@ -1,7 +1,7 @@
 #!/bin/bash
 # Make the Jetson's logs survive reboots and power loss, and capture core dumps.
 #
-#   sudo ./scripts/setup-persistent-logs.sh
+#   sudo bash scripts/setup-persistent-logs.sh && sudo reboot
 #
 # Host-level settings that a container cannot make for itself:
 #   0. A unique machine ID. Jetsons flashed from the same image share one,
@@ -73,17 +73,12 @@ sysctl -p /usr/lib/sysctl.d/50-coredump.conf
 
 echo ""
 if [ "$REBOOT_NEEDED" = true ]; then
-    echo -e "${RED}The machine ID changed: reboot now (sudo reboot).${NC}"
-    echo "Journals from before the change stay readable with:"
+    echo "The machine ID changed. Journals from before the change stay readable with:"
     echo "  journalctl -D /var/log/journal/$CLONED_IMAGE_MACHINE_ID"
     echo ""
 fi
-echo -e "${GREEN}Done. Check:${NC}"
-echo "  cat /etc/machine-id                    # differs between Jetsons"
-echo "  ls /var/log/journal                    # a machine-id directory exists"
-echo "  journalctl --list-boots                # grows by one entry per boot"
+echo -e "${RED}Done. Reboot now: sudo reboot${NC}"
+echo "Then check (README 3.2):"
+echo "  cat /etc/machine-id                    # not $CLONED_IMAGE_MACHINE_ID"
+echo "  journalctl --list-boots | tail -2      # grows by one entry per boot"
 echo "  cat /proc/sys/kernel/core_pattern      # |/lib/systemd/systemd-coredump ..."
-echo "  coredumpctl list                       # crashes, once there are any"
-echo ""
-echo "Then recreate the container so the logging changes in docker-compose.yml"
-echo "take effect: docker compose up -d"

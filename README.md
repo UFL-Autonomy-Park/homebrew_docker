@@ -6,8 +6,9 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 
 - [1. First-Time Jetson Setup](#1-first-time-jetson-setup)
 - [2. Build the ZED Base Image](#2-build-the-zed-base-image)
-- [3. Configure homebrew_docker](#3-configure-homebrew_docker)
-- [4. Optional: Auto-Start on Boot](#4-optional-auto-start-on-boot)
+- [3. Set Up homebrew_docker](#3-set-up-homebrew_docker)
+- [4. Auto-Start on Boot](#4-auto-start-on-boot)
+- [After setup: changing `homebrew_ws`](#after-setup-changing-homebrew_ws)
 - [5. RTK Corrections](#5-rtk-corrections)
 - [6. Persistent Logs](#6-persistent-logs)
 - [7. MAVROS Plugin List](#7-mavros-plugin-list)
@@ -18,7 +19,14 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 
 ## 1. First-Time Jetson Setup
 
-### 1.1 Remote in to the Jetson via SSH
+Sections 1–4 are one linear procedure for a freshly flashed Jetson. Run every
+block in order, top to bottom, exactly as written; nothing is skipped
+conditionally. All commands run on the Jetson over SSH unless a step says
+otherwise.
+
+### 1.1 SSH in to the Jetson
+
+On your computer:
 
 ```bash
 ssh autonomypark@192.168.XXX.XXX
@@ -26,59 +34,51 @@ ssh autonomypark@192.168.XXX.XXX
 
 You will need the autonomypark user password, but that will not be given here.
 
-### 1.2 Prepare the hostname
+### 1.2 Update packages
 
 ```bash
 sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install nano -y
+sudo apt-get install -y nano git curl
 ```
 
 ### 1.3 Connect to Wi-Fi
 
-Connect using whichever network applies.
+Run the one line for the network the Jetson will use.
 
-**APark Wi-Fi**
+APark Wi-Fi:
 
-```
+```bash
 sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$APARK_WIFI_PW"
 ```
 
-**Indoor Lab Wi-Fi**
+Indoor Lab Wi-Fi:
 
-```
+```bash
 sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$NCR_WIFI_PW"
 ```
 
 ### 1.4 Set the hostname
 
-Use a two-digit `$NUMBER`.
-
-```
-sudo hostnamectl set-hostname homebrew-jetson-"$NUMBER"
-```
-
-Also update the hostname in the hosts file:
-
-```bash
-sudo nano /etc/hosts
-```
-
-Reboot to apply changes:
-
-```bash
-sudo reboot
-```
-
-### 1.5 Update the router IP reservation
-
-Log in to the router and fix the IP address. Log this in the IP reservations document in the Autonomy Park Google Drive.
-
 > [!IMPORTANT]
-> On the router (Ubiquiti), under Client Devices, your Jetson will flicker between its new and old hostname. Not much can be done about this — wait until the flicker stops (e.g., the next day) before fixing the local IP address. This may have been patched by Ubiquiti since this note was written.
+> Set `NUMBER` to this homebrew's **two-digit** number (homebrew05 → `05`).
+> Later steps read the number back from the hostname, so a typo here
+> propagates everywhere.
 
-### 1.6 Docker 28+ compatibility fix
+```bash
+NUMBER=05
+sudo hostnamectl set-hostname "homebrew-jetson-$NUMBER"
+sudo sed -i '/^127\.0\.1\.1\s/d' /etc/hosts
+echo -e "127.0.1.1\thomebrew-jetson-$NUMBER" | sudo tee -a /etc/hosts
+hostname
+```
 
-If you are using Docker 28+ (check with `apt-cache policy docker-cli`; almost certain if you ran `sudo apt upgrade`), the following is required. The Jetson's kernel cannot be upgraded with `apt` (unlike a regular Ubuntu machine) without changing JetPack versions. Do not attempt to upgrade the kernel.
+`hostname` should print `homebrew-jetson-05` (with your number).
+
+### 1.5 Docker compatibility fix
+
+The Jetson's kernel lacks a feature Docker 28+ expects. This setting works
+around it and is harmless on older Docker. Do not try to upgrade the kernel:
+on a Jetson that means changing JetPack versions.
 
 ```bash
 sudo mkdir -p /etc/systemd/system/docker.service.d
@@ -88,27 +88,42 @@ Environment="DOCKER_INSECURE_NO_IPTABLES_RAW=1"
 EOF
 sudo systemctl daemon-reload
 sudo systemctl restart docker
+sudo systemctl show docker --property=Environment
 ```
 
-Confirm the change was successful before proceeding.
+The last command should print `Environment=DOCKER_INSECURE_NO_IPTABLES_RAW=1`.
+
+### 1.6 Reboot
+
+> [!CAUTION]
+> **Reboot now**, so the hostname applies everywhere. Your SSH session drops;
+> wait about a minute and SSH back in (1.1).
 
 ```bash
-sudo journalctl -u docker.service --since "5 minutes ago" | grep DOCKER_INSECURE_NO_IPTABLES_RAW
+sudo reboot
 ```
+
+### 1.7 Update the router IP reservation
+
+Log in to the router and fix the IP address. Log this in the IP reservations
+document in the Autonomy Park Google Drive.
+
+> [!IMPORTANT]
+> On the router (Ubiquiti), under Client Devices, your Jetson will flicker between its new and old hostname. Not much can be done about this — wait until the flicker stops (e.g., the next day) before fixing the local IP address. This may have been patched by Ubiquiti since this note was written.
 
 ## 2. Build the ZED Base Image
 
-Clone our fork of the ZED ROS 2 wrapper:
-
 ```bash
+cd ~
 git clone https://github.com/UFL-Autonomy-Park/zed_ros2_wrapper_jetson.git
-cd zed_ros2_wrapper_jetson
+cd ~/zed_ros2_wrapper_jetson
 git switch autonomypark/humble-v5.0.0
 ```
 
 Build the ROS 2 Humble, ZED SDK v5.0.0, L4T r36.3.0 base image:
 
 ```bash
+cd ~/zed_ros2_wrapper_jetson
 sudo docker buildx bake --allow=network.host -f docker-compose.yml
 sudo ./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
 	l4t-r36.3.0 \
@@ -117,227 +132,292 @@ sudo ./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
 
 ---
 
-## 3. Configure homebrew_docker
+## 3. Set Up homebrew_docker
 
-### 3.1 Clone and configure
+### 3.1 Clone and create `.env`
 
 ```bash
-git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git && cd homebrew_docker
+cd ~
+git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git
+cd ~/homebrew_docker
 cp .env.example .env
 ```
 
-Edit `.env` with the details your Jetson needs. `USE_DISCOVERY_SERVER`,
-`FCU_URL`, `MAVROS_NAMESPACE`, `MAVROS_TGT_SYSTEM` and the `NTRIP_*` settings
-are required: `docker compose` refuses to start without them rather than guess.
-`MAVROS_TGT_SYSTEM` is covered in [3.4](#34-set-a-unique-mavlink-system-id)
-and NTRIP in [5](#5-rtk-corrections).
+`.env` holds this vehicle's settings. The steps below fill in the
+vehicle-specific ones; the rest (discovery server, NTRIP caster, MAVROS
+plugin list) are the lab's defaults and stay as they are.
 
-### 3.2 ZED camera calibration
+### 3.2 Persistent logs and machine ID
 
-Set up your ZED camera with a factory calibration file before launching.
-
-Get your serial number by plugging the ZED into the Jetson and running:
+Makes the system journal survive reboots and power loss, collects core dumps,
+and gives the Jetson its own machine ID (Jetsons flashed from the same image
+share one). Details in [6](#6-persistent-logs).
 
 ```bash
-lsusb -v 2>/dev/null | grep -A20 -i stereolabs
+cd ~/homebrew_docker
+sudo bash scripts/setup-persistent-logs.sh
 ```
 
-Using the 8-digit serial number:
-
-```
-mkdir -p config/zed
-ZED_SERIAL=${YOUR_ZED_SERIAL_NUMBER}
-curl -fL \
-  "https://calib.stereolabs.com/?SN=${ZED_SERIAL}" \
-  -o "config/zed/SN${ZED_SERIAL}.conf"
-```
-
-### 3.3 Flight controller udev rule
-
-First, find the serial number for the FTDI cable you're using:
+> [!CAUTION]
+> **Reboot now**, every time, whatever the script printed: the new machine ID
+> only takes effect after a reboot. SSH back in (1.1) afterwards.
 
 ```bash
-lsusb -v | grep -i BG
+sudo reboot
 ```
 
-If it doesn't appear, find the device in the full `lsusb -v` output and copy its `iSerial`:
-
-```
-idVendor           0x0403 Future Technology Devices International, Ltd
-idProduct          0x6001 FT232 Serial (UART) IC
-```
-
-> [!WARNING]
-> Do not swap FTDI cables between quadcopters — serial numbers are unique to each cable.
-
-Edit the udev script and paste in the serial number:
+After the reboot, check:
 
 ```bash
-nano scripts/setup-udev-fc.sh
+cat /etc/machine-id
+journalctl --list-boots | tail -2
 ```
 
-Save and exit, then run it:
+The machine ID must **not** be `5dbfb12414a3456d9014d88183e338b1`, and the
+boot list should show the boot before this one.
 
-```bash
-sudo chmod +x scripts/setup-udev-fc.sh
-sudo ./scripts/setup-udev-fc.sh
-```
-
-If instructed by the script, unplug and replug the FTDI cable connecting to the flight controller. Otherwise, it should print `✓ Symlink /dev/ttyFC exists!`.
-
-### 3.4 Set a unique MAVLink system ID
+### 3.3 Flight controller parameters
 
 > [!WARNING]
 > Every vehicle on the network — homebrews, the Astro, anything else running
 > MAVROS — must have a **unique** MAVLink system ID. Otherwise vehicles receive
 > each other's telemetry *and commands* (arming, mode changes, setpoints,
-> parameter writes), even though their topics are namespaced.
+> parameter writes), even though their topics are namespaced. Use the
+> homebrew number (homebrew05 → `5`) and record it with the IP reservation.
+> **Never use 1:** Freefly forces every Astro to `MAV_SYS_ID=1`.
 
-**Why:** `mavros_node` is a router (talks to the FCU over `/dev/ttyFC`) plus a
-UAS node (runs the plugins that publish `/<namespace>/...`). The two exchange
-raw MAVLink over the ROS topics `/uas<N>/mavlink_source` and
-`/uas<N>/mavlink_sink`, where `N` is MAVROS's `tgt_system`. MAVROS hardcodes
-these as **absolute** names, so `MAVROS_NAMESPACE` does not apply to them.
-Every vehicle left at the default `tgt_system=1` shares `/uas1` across the
-DDS network, and each vehicle's MAVROS reads and writes every vehicle's FCU.
+In QGroundControl (Vehicle Setup → Parameters), set:
 
-**How:** use the homebrew number (homebrew02 → 2, homebrew03 → 3, ...), and
-keep a record of which IDs are taken. **Never use 1:** Freefly forces every
-Astro to `MAV_SYS_ID=1` and it can't be changed, so `/uas1` belongs to the
-Astros (see the astro_mavros README).
+| Parameter | Value | Why |
+|---|---|---|
+| `MAV_SYS_ID` | the homebrew number, e.g. `5` | unique MAVLink ID; must equal `MAVROS_TGT_SYSTEM` (3.6) |
+| `MAV_1_CONFIG` | `TELEM 2` | MAVLink to the Jetson on TELEM2 |
+| `MAV_1_MODE` | `Onboard` | |
+| `SER_TEL2_BAUD` | `921600 8N1` | must match `FCU_URL` in `.env` |
+| `UXRCE_DDS_CFG` | `Disabled` | TELEM2 is MAVROS's ([8](#8-flight-controller-bridge-mavros-or-micro-xrce-dds-agent)) |
+| `UAVCAN_PUB_RTCM` | `Enabled` | forwards RTK corrections to the Here4 ([5](#5-rtk-corrections)) |
 
-1. In QGC, set the FCU parameter `MAV_SYS_ID` to the vehicle's ID and reboot
-   the flight controller (the new ID only takes effect after a reboot).
-2. Set the same value in `.env`:
-   ```
-   MAVROS_TGT_SYSTEM=2
-   ```
-3. If the container is already running, recreate it (otherwise continue
-   with 3.5–3.7 first):
-   ```
-   sudo docker compose up -d --force-recreate
-   ```
+Then reboot the flight controller (Vehicle Setup → Parameters → Tools →
+Reboot Vehicle). `MAV_SYS_ID` only takes effect after a reboot.
 
-The two values **must match**. If `MAVROS_TGT_SYSTEM` differs from the FCU's
-`MAV_SYS_ID`, MAVROS drops the FCU's messages and the vehicle's topics exist
-but stay silent.
+**Why the ID matters:** `mavros_node` is a router (talks to the FCU over
+`/dev/ttyFC`) plus a UAS node (runs the plugins that publish
+`/<namespace>/...`). The two exchange raw MAVLink over the ROS topics
+`/uas<N>/mavlink_source` and `/uas<N>/mavlink_sink`, where `N` is MAVROS's
+`tgt_system`. MAVROS hardcodes these as **absolute** names, so
+`MAVROS_NAMESPACE` does not apply to them, and two vehicles with the same ID
+share one link across the network.
 
-Verify once it is running (the `ros2` commands go through the container;
-see [Inspecting the ROS graph](#inspecting-the-ros-graph)):
+### 3.4 Flight controller serial port (`/dev/ttyFC`)
+
+> [!WARNING]
+> Plug in **only** the FTDI cable to this vehicle's flight controller, and do
+> not swap FTDI cables between quadcopters: the rule matches this cable's
+> serial number.
 
 ```bash
-sudo docker compose logs homebrew_bringup | grep -E "UAS Prefix|MY ID"
-#   UAS Prefix: /uas2
-#   MAVROS UAS via /uas2 started. MY ID 2.191, TARGET ID 2.1
-hbros ros2 topic list | grep '^/uas'
+cd ~/homebrew_docker
+ls /dev/serial/by-id/
+FTDI_SERIAL=$(ls /dev/serial/by-id/ | grep -m1 '^usb-FTDI' | sed -E 's/.*_([^_]+)-if[0-9]+-port[0-9]+$/\1/')
+echo "FTDI serial: $FTDI_SERIAL"
+sudo bash scripts/setup-udev-fc.sh "$FTDI_SERIAL"
 ```
 
-Each `/uas<N>` pair should have exactly one vehicle's `mavros_router` and
-`mavros` nodes on it (`hbros ros2 topic info -v /uas2/mavlink_source`).
-
-### 3.5 Build the image
-
-Once per Jetson, before the first `up`, set up persistent logs and a unique
-machine ID ([6](#6-persistent-logs)); reboot if the script says so:
+`ls` should show one `usb-FTDI_FT232R_USB_UART_<serial>-if00-port0` entry,
+and `FTDI serial:` its `<serial>` part. **Unplug the FTDI cable from the
+Jetson, plug it back in**, then check:
 
 ```bash
-sudo ./scripts/setup-persistent-logs.sh
+ls -l /dev/ttyFC
 ```
 
-Then build the image (from `homebrew_docker/`):
+It should point to a `ttyUSB` device.
+
+### 3.5 ZED camera calibration
+
+With the ZED plugged into the Jetson, find its serial number (8 digits, also
+printed on the camera):
 
 ```bash
+lsusb -v 2>/dev/null | grep -A20 -i stereolabs
+```
+
+> [!IMPORTANT]
+> Replace `12345678` below with your camera's serial number.
+
+```bash
+cd ~/homebrew_docker
+ZED_SERIAL=12345678
+sed -i "s/^ZED_SERIAL=.*/ZED_SERIAL=$ZED_SERIAL/" .env
+mkdir -p config/zed
+curl -fL "https://calib.stereolabs.com/?SN=$ZED_SERIAL" -o "config/zed/SN$ZED_SERIAL.conf"
+head -3 "config/zed/SN$ZED_SERIAL.conf"
+```
+
+`head` should show a `[LEFT_CAM_...]` section, not an error page.
+
+> [!WARNING]
+> The container mounts `config/zed/SN<ZED_SERIAL>.conf`. If that file does not
+> exist when the container first starts, Docker creates an empty, root-owned
+> **directory** with that name instead, and the ZED can't be calibrated. Do
+> not continue until `head` shows the calibration file.
+
+### 3.6 Vehicle settings in `.env`
+
+The namespace and MAVLink ID come from the hostname set in 1.4:
+
+```bash
+cd ~/homebrew_docker
+NUMBER=$(hostname | grep -oE '[0-9]+$')
+sed -i "s/^MAVROS_NAMESPACE=.*/MAVROS_NAMESPACE=homebrew$NUMBER/" .env
+sed -i "s/^MAVROS_TGT_SYSTEM=.*/MAVROS_TGT_SYSTEM=$((10#$NUMBER))/" .env
+grep -E '^(MAVROS_NAMESPACE|MAVROS_TGT_SYSTEM|ZED_SERIAL|FCU_URL|MAVROS_PLUGINS|USE_DISCOVERY_SERVER)=' .env
+```
+
+For homebrew05 this shows `MAVROS_NAMESPACE=homebrew05`,
+`MAVROS_TGT_SYSTEM=5`, your `ZED_SERIAL`, `FCU_URL=/dev/ttyFC:921600`,
+`MAVROS_PLUGINS=minimal` and `USE_DISCOVERY_SERVER=true`.
+
+> [!WARNING]
+> `MAVROS_TGT_SYSTEM` must equal the flight controller's `MAV_SYS_ID` (3.3).
+> If they differ, MAVROS drops the FCU's messages: the vehicle's topics exist
+> but stay silent.
+
+### 3.7 Build the image
+
+Takes a while (it builds MAVROS and the Micro XRCE-DDS Agent from source).
+
+```bash
+cd ~/homebrew_docker
 sudo docker compose build
 ```
 
-### 3.6 Build the homebrew_bringup package (inside the container)
+### 3.8 Build the homebrew_bringup package
 
-> [!WARNING]
-> Nothing in the Dockerfile, `docker-compose.yml`, or `ros_entrypoint.sh` builds
-> `homebrew_ws` for you. `homebrew_ws` is bind-mounted into the container so you
-> can edit and rebuild without a full image rebuild — but that means **you must
-> build it yourself, once initially and again after any change to `homebrew_ws`
-> source**, or the container will crash-loop with `homebrew_bringup` not found.
+> [!IMPORTANT]
+> The Jetson has no ROS 2: `ros2` and `colcon` exist **only inside the
+> container**. Your SSH session is on the Jetson itself, so you open a bash
+> shell inside a container first. Its prompt looks like
+> `root@homebrew-jetson-05:~/homebrew_ws#`; `exit` returns to the Jetson.
+> Inside, `/root/homebrew_ws` **is** `~/homebrew_docker/homebrew_ws` on the
+> Jetson (bind-mounted), so the build output lands on the Jetson where the
+> real container finds it.
 
-The Jetson itself does not need ROS 2: build with the image's ROS, in a
-one-off container. From `homebrew_docker/`:
+Nothing builds `homebrew_ws` automatically: without this step the container
+crash-loops with `homebrew_bringup` not found. Open a build shell, a
+temporary container with the same image and mounts:
 
 ```bash
-sudo docker compose run --rm --no-deps \
-  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-  homebrew_bringup \
-  bash -c 'colcon build --packages-select homebrew_bringup; s=$?; chown -R "$HOST_UID:$HOST_GID" build install log; exit $s'
+cd ~/homebrew_docker
+sudo docker compose run --rm homebrew_bringup bash
 ```
 
-What this does, and why:
-
-- `docker compose run` starts a temporary container from the same service,
-  with the same image and mounts as the real one: `./homebrew_ws` on the host
-  is `/root/homebrew_ws` in the container, and the image's working directory
-  is `/root/homebrew_ws`. `colcon` therefore writes `build/`, `install/` and
-  `log/` into `homebrew_docker/homebrew_ws/` on the host, where the real
-  container finds them.
-- The image's entrypoint runs first and sources the image's ROS 2, MAVROS,
-  ZED and `ntrip_client` workspaces, so `colcon` is the image's. It prints
-  `Warning: /root/homebrew_ws has not been built yet` on the first build:
-  expected. It also waits for Wi-Fi (a default route), as on every start.
-- `--rm` deletes the temporary container afterwards; `--no-deps` starts
-  nothing else. It runs alongside a running `autonomypark-homebrew` without
-  touching it. `compose run` does not use `container_name` or the restart
-  policy, so it doesn't clash with the running container.
-- The container runs as root, so the `chown` hands the build output back to
-  your user (`$(id -u)`/`$(id -g)` are expanded by your shell before `sudo`).
-  The exit status is `colcon`'s.
-- `docker compose` checks the whole of `.env` even for this, so finish 3.1
-  first, and 3.2: it mounts `config/zed/SN${ZED_SERIAL}.conf`, and if that
-  file doesn't exist Docker creates an empty, root-owned *directory* with
-  that name (delete it with `sudo rmdir` before downloading the file).
-- Drop `--packages-select homebrew_bringup` to build every package in
-  `homebrew_ws/src`.
-
-Check that it worked: the build should end in
-`Summary: 1 package finished`, and
+It prints `Warning: /root/homebrew_ws has not been built yet` (expected, that's
+what this step fixes) and gives you the container's prompt. In the
+**container's** shell:
 
 ```bash
+colcon build --packages-select homebrew_bringup
+exit
+```
+
+The build should end with `Summary: 1 package finished`. Back on the
+**Jetson**: the container ran as root, so give the build output back to your
+user, then check the launch file was installed:
+
+```bash
+cd ~/homebrew_docker
+sudo chown -R "$USER:$USER" homebrew_ws/build homebrew_ws/install homebrew_ws/log
 ls homebrew_ws/install/homebrew_bringup/share/homebrew_bringup/launch/
 ```
 
-should list `homebrew.launch.py`.
+`ls` should list `homebrew.launch.py`.
+
+### 3.9 Start the container
+
+```bash
+cd ~/homebrew_docker
+sudo docker compose up -d
+sudo docker compose ps
+```
+
+`ps` should show `autonomypark-homebrew` as `Up` (not `Restarting`).
+
+### 3.10 Check the vehicle
+
+Wait one minute after 3.9, then on the Jetson:
+
+```bash
+cd ~/homebrew_docker
+sudo docker compose logs homebrew_bringup | grep -E "Got HEARTBEAT|UAS Prefix|MY ID"
+```
+
+Expect `CON: Got HEARTBEAT, connected`, `UAS Prefix: /uas5` and
+`MY ID 5.191, TARGET ID 5.1` (with your number).
+
+Now open a shell in the **running** container. This command is different from
+3.8's: it attaches to the live container and selects the discovery-server
+profile that can see the whole ROS graph:
+
+```bash
+sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
+```
+
+In the **container's** shell:
+
+```bash
+NUMBER=$(hostname | grep -oE '[0-9]+$')
+ros2 topic echo --once /homebrew$NUMBER/state --field connected
+ros2 topic echo --once /homebrew$NUMBER/gpsstatus/gps1/raw --field fix_type
+ros2 topic info /uas$((10#$NUMBER))/mavlink_source
+exit
+```
+
+| Command | Expected |
+|---|---|
+| `state --field connected` | `true` |
+| `gps1/raw --field fix_type` | `6` (RTK fixed) outdoors with the base running, ~90 s after power-on; `3`/`4` indoors |
+| `topic info /uas<N>/mavlink_source` | `Publisher count: 1` and `Subscription count: 1` |
+
+> [!CAUTION]
+> A publisher or subscription count above 1 on `/uas<N>/mavlink_source` means
+> another vehicle on the network uses the same MAVLink ID. Stop and fix
+> `MAV_SYS_ID` (3.3) before flying.
+
+## 4. Auto-Start on Boot
+
+Starts the stack at boot and stops it cleanly at shutdown. The first script
+removes any previous auto-start, so this is safe to run again.
+
+```bash
+cd ~/homebrew_docker
+sudo bash scripts/remove-autostart.sh
+sudo bash scripts/setup-autostart.sh
+sudo systemctl start homebrew-docker.service
+systemctl is-enabled homebrew-docker.service
+```
+
+The last command should print `enabled`.
+
+## After setup: changing `homebrew_ws`
+
+After any change under `homebrew_ws/src/`, including a `git pull`, rebuild and
+recreate the container. A plain `docker compose up -d` does not restart an
+unchanged container, so it would keep running the old launch file.
+
+```bash
+cd ~/homebrew_docker
+sudo docker compose run --rm homebrew_bringup bash -c "colcon build --packages-select homebrew_bringup"
+sudo chown -R "$USER:$USER" homebrew_ws/build homebrew_ws/install homebrew_ws/log
+sudo docker compose up -d --force-recreate
+```
 
 > [!NOTE]
-> Build only this way, even on a Jetson that has ROS 2 installed: the host
-> doesn't have the image's packages (MAVROS, `ntrip_client`, the ZED
-> wrapper), and mixing host and container builds in one `build/` directory
-> is untested. If `homebrew_ws` was previously built on the host, delete the
-> old output once first:
-> `sudo rm -rf homebrew_ws/build homebrew_ws/install homebrew_ws/log`.
-> Do not add `--symlink-install`.
-
-### 3.7 Run
-
-```bash
-sudo docker compose up -d
-```
-
-If you edit anything under `homebrew_ws/src/` after this point (including
-after a `git pull`), re-run the build command from
-[3.6](#36-build-the-homebrew_bringup-package-inside-the-container), then
-`sudo docker compose up -d --force-recreate` (a plain `up -d` does not restart
-an unchanged container, so it would keep running the old launch file).
-
-## 4. Optional: Auto-Start on Boot
-
-Remove any old auto-starts
-```bash
-sudo chmod +x scripts/remove-autostart.sh
-sudo ./scripts/remove-autostart.sh
-```
-
-Add yours.
-```bash
-sudo chmod +x scripts/setup-autostart.sh
-sudo ./scripts/setup-autostart.sh
-```
+> Build only in the container, even on a Jetson that has ROS 2 installed: the
+> host doesn't have the image's packages (MAVROS, `ntrip_client`, the ZED
+> wrapper), and mixing host and container builds in one `build/` directory is
+> untested. Do not add `--symlink-install`.
 
 ## 5. RTK Corrections
 
@@ -347,16 +427,26 @@ the Dockerfile) that pulls RTCM corrections from the base station's caster
 over Wi-Fi and hands them to MAVROS (`/<namespace>/gps_rtk/send_rtcm`), which
 sends them to the FCU. No ground-station MAVProxy is needed.
 
-1. On the FCU, set `UAVCAN_PUB_RTCM` to Enabled and reboot. The Here4 is a
-   DroneCAN GPS, so PX4 must forward RTCM onto the CAN bus.
-2. Set the `NTRIP_*` values in `.env` to the caster (for the Emlid base's
-   local caster: its IP, port 2101, mountpoint, username and password).
-3. Before takeoff, check the fix (through the container, see
-   [Inspecting the ROS graph](#inspecting-the-ros-graph)):
-   ```bash
-   hbros ros2 topic echo --once /<namespace>/gpsstatus/gps1/raw --field fix_type
-   ```
-   `6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
+Setup is part of 3.3 (`UAVCAN_PUB_RTCM = Enabled`: the Here4 is a DroneCAN
+GPS, so PX4 must forward RTCM onto the CAN bus) and `.env` (the `NTRIP_*`
+values point at the Emlid base's local caster: IP, port 2101, mountpoint,
+username and password).
+
+**Before every takeoff, check the fix.** On the Jetson:
+
+```bash
+sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
+```
+
+In the **container's** shell:
+
+```bash
+ros2 topic echo --once /homebrew$(hostname | grep -oE '[0-9]+$')/gpsstatus/gps1/raw --field fix_type
+exit
+```
+
+`6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
 
 The client sends the vehicle's GPS position to the caster (as GGA, from
 `global_position/raw/fix`); the Emlid local caster sends no corrections until
@@ -402,12 +492,8 @@ down`. Three pieces fix this:
 | Kernel and system messages (USB disconnects, throttling, segfaults) | the host's systemd journal | the script below |
 | Core dumps (e.g. a MAVROS segfault) | `/var/lib/systemd/coredump/` | `docker-compose.yml` + the script below |
 
-Run this once per Jetson (it needs sudo), then recreate the container:
-
-```bash
-sudo ./scripts/setup-persistent-logs.sh
-docker compose up -d
-```
+Set up by `scripts/setup-persistent-logs.sh` in [3.2](#32-persistent-logs-and-machine-id),
+followed by a reboot.
 
 The script also gives the Jetson its own **machine ID**. Jetsons flashed from
 the same image share one (`5dbfb124...` on the homebrews), so their journals
@@ -417,7 +503,7 @@ Regenerating it takes two files: `systemd-machine-id-setup` copies the old ID
 back from `/var/lib/dbus/machine-id` if that file still exists, so the script
 removes both, regenerates, and makes the D-Bus file a symlink to
 `/etc/machine-id`. It only does this when the ID is still the image's, so
-re-running it is harmless. **Reboot when it says the ID changed.** Journals
+re-running it is harmless. A reboot is needed for the new ID. Journals
 written under the old ID stay readable with
 `journalctl -D /var/log/journal/5dbfb12414a3456d9014d88183e338b1`.
 
@@ -459,9 +545,8 @@ MAVROS used ~0.26 of a core. Before flying on `minimal`, confirm outdoors with
 an RTK fix that `global_position/local`, `global_position/global` and RTK
 corrections (`gpsstatus/gps1/raw` reaching fix type 6) all work.
 
-After changing it, rebuild `homebrew_bringup`
-([3.6](#36-build-the-homebrew_bringup-package-inside-the-container)) if the
-launch file changed, then `sudo docker compose up -d --force-recreate`. To check which plugins loaded:
+After changing it, run the commands in
+[After setup: changing `homebrew_ws`](#after-setup-changing-homebrew_ws). To check which plugins loaded:
 
 ```bash
 grep -oE "Plugin [a-z_0-9]+ initialized" logs/ros/mavros_node_*.log | sort | uniq -c
@@ -537,29 +622,44 @@ vehicle; PX4 v1.16.2 stock topic list):
    file. In QGroundControl → Analyze Tools → MAVLink Console (use your
    vehicle's namespace):
 
+   > [!WARNING]
+   > This **overwrites** `/fs/microsd/etc/extras.txt`. The homebrews have none
+   > by default; the first line prints any existing one so you can see what
+   > would be lost.
+
    ```
    cat /fs/microsd/etc/extras.txt
    mkdir /fs/microsd/etc
    echo "uxrce_dds_client stop" > /fs/microsd/etc/extras.txt
-   echo "uxrce_dds_client start -t serial -d /dev/ttyS1 -b p:SER_TEL2_BAUD -n homebrew03" >> /fs/microsd/etc/extras.txt
+   echo "uxrce_dds_client start -t serial -d /dev/ttyS1 -b p:SER_TEL2_BAUD -n homebrew05" >> /fs/microsd/etc/extras.txt
    reboot
    ```
 
-   The first `cat` shows whether an `extras.txt` already exists; if it does,
-   append the two lines to it instead of overwriting. `/dev/ttyS1` is TELEM2
+   Replace `homebrew05` with your vehicle's namespace. `/dev/ttyS1` is TELEM2
    on the CubeOrange. After the reboot, `uxrce_dds_client status` should show
    it running on `/dev/ttyS1`.
 
-3. **`.env`** on the Jetson: `LAUNCH_MAVROS=false`, `LAUNCH_XRCE_AGENT=true`,
-   then `docker compose up -d`.
+3. **`.env`** on the Jetson:
 
-4. **Check** that the session is up and the topics carry your namespace
-   (the image's `ros2` CLI with the super-client profile, as in
-   [Inspecting the ROS graph](#inspecting-the-ros-graph)):
+   ```bash
+   cd ~/homebrew_docker
+   sed -i "s/^LAUNCH_MAVROS=.*/LAUNCH_MAVROS=false/; s/^LAUNCH_XRCE_AGENT=.*/LAUNCH_XRCE_AGENT=true/" .env
+   sudo docker compose up -d --force-recreate
+   ```
+
+4. **Check** that the session is up. On the Jetson:
 
    ```bash
    journalctl CONTAINER_NAME=autonomypark-homebrew -b | grep -i "session established"
-   hbros ros2 topic list | grep fmu
+   sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+     autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
+   ```
+
+   In the **container's** shell:
+
+   ```bash
+   ros2 topic list | grep fmu
+   exit
    ```
 
    Expect `/<namespace>/fmu/out/...` and `/<namespace>/fmu/in/...` (51 topics
@@ -581,10 +681,22 @@ vehicle; PX4 v1.16.2 stock topic list):
 > The agent bundles its own Fast DDS (2.14), separate from ROS 2 Humble's
 > (2.6); both speak standard RTPS to the discovery server.
 
-To switch back: reverse the parameter table (`UXRCE_DDS_PTCFG` back to
-`Default`), delete the two lines from
-`extras.txt` (or the file, `rm /fs/microsd/etc/extras.txt`, if you created
-it), reboot the FCU, and set `LAUNCH_MAVROS=true`, `LAUNCH_XRCE_AGENT=false`.
+**To switch back to MAVROS:**
+
+1. Set the parameters in the table's MAVROS column (`UXRCE_DDS_PTCFG` back
+   to `Default`).
+2. In the MAVLink Console, remove the namespace file and reboot:
+   ```
+   rm /fs/microsd/etc/extras.txt
+   reboot
+   ```
+3. On the Jetson:
+   ```bash
+   cd ~/homebrew_docker
+   sed -i "s/^LAUNCH_MAVROS=.*/LAUNCH_MAVROS=true/; s/^LAUNCH_XRCE_AGENT=.*/LAUNCH_XRCE_AGENT=false/" .env
+   sudo docker compose up -d --force-recreate
+   ```
+4. Check as in [3.10](#310-check-the-vehicle).
 
 ### 8.2 RTK with the XRCE agent
 
@@ -618,12 +730,13 @@ coredumpctl list
 
 **Using the Micro USB connection instead of FTDI**
 
-If you are troubleshooting the flight controller with the Micro USB connection instead of the FTDI cable, change the following values in `setup-udev-fc.sh`:
+To troubleshoot the flight controller over its Micro USB port instead of the
+FTDI cable, point `/dev/ttyFC` at it (the FTDI rule is replaced; run 3.4
+again to switch back):
 
-```
-VENDOR_ID="0403"    -> VENDOR_ID="2dae"
-PRODUCT_ID="6001"   -> PRODUCT_ID="1016"
-SERIAL_NUM="PLACEHOLDER" -> SERIAL_NUM="0"
+```bash
+cd ~/homebrew_docker
+sudo VENDOR_ID=2dae PRODUCT_ID=1016 bash scripts/setup-udev-fc.sh 0
 ```
 
 Docker stuck in a crash loop? Look at the logs
@@ -645,46 +758,36 @@ sudo systemctl status docker.service
 > Always double-check the discovery server IP in both
 > `config/fastdds/client_config.xml` and `config/fastdds/super_client_config.xml`.
 
-### Inspecting the ROS graph
+### Opening a ROS 2 shell
 
-The Jetson has no ROS 2 of its own: run `ros2` commands inside the running
-container, through its entrypoint, which sources every workspace and applies
-the discovery-server profile. Select the `SUPER_CLIENT` profile: the
-vehicle's nodes run as plain discovery-server `CLIENT`s, which only receive
-discovery data for topics they use, so a `ros2` command run as one would see
-an almost empty graph.
-
-For an interactive shell (Ctrl-C works; `exit` to leave):
+The Jetson has no ROS 2: `ros2` and `colcon` exist only inside the container.
+From your SSH session on the Jetson, open a shell in the **running**
+container:
 
 ```bash
 sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
   autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
 ```
 
-For one-off commands from the host, define this once per login shell (or add
-it to `~/.bashrc`); the rest of this README uses it:
-
-```bash
-hbros() {
-  sudo docker exec -i -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-    autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh "$@"
-}
-hbros ros2 topic list
-```
-
-`hbros` has no terminal attached, so Ctrl-C stops `docker exec` but can leave
-the command running in the container: give commands that never end a limit,
-e.g. `hbros timeout 10 ros2 topic hz <topic>` or `ros2 topic echo --once`.
-`autonomypark-homebrew` is `CONTAINER_NAME` from `.env`.
+`exit` returns to the Jetson. The entrypoint loads every workspace, so `ros2`
+works; a plain `docker exec -it autonomypark-homebrew bash` skips it and
+`ros2` is not found. The `FASTRTPS_PROFILE_PATH` selects the `SUPER_CLIENT`
+discovery profile on purpose: the vehicle's nodes run as plain
+discovery-server `CLIENT`s, which only receive discovery data for topics they
+use, so a `ros2` command run as one would see an almost empty graph. If the
+container isn't running (e.g. crash-looping), use the build shell from 3.8
+instead: `sudo docker compose run --rm homebrew_bringup bash` (from
+`~/homebrew_docker`).
 
 The `ros2` daemon keeps the profile it was started with. If commands see an
-empty graph, run `hbros ros2 daemon stop` and retry.
+empty graph, run `ros2 daemon stop` in the shell and retry.
 
-Useful commands (inside the interactive shell, or prefixed with `hbros`):
+Useful commands:
 
 ```bash
+ros2 topic list
 ros2 topic info -v <topic>   # which nodes (and namespaces) publish/subscribe
-ros2 topic hz <topic>        # is anything actually arriving?
+ros2 topic hz <topic>        # is anything actually arriving? (Ctrl-C to stop)
 ros2 param get <node> <param>
 ```
 
@@ -696,7 +799,7 @@ and both are handled:
 
 - **MAVROS's internal link** (`/uas<N>/mavlink_{source,sink}`) is keyed by
   the system ID, not the namespace — see
-  [3.4](#34-set-a-unique-mavlink-system-id).
+  [3.3](#33-flight-controller-parameters).
 - **Topics nodes use under absolute names** (`/tf`, `/tf_static`,
   `/diagnostics`, `/move_base_simple/goal`) are remapped under the
   namespace for every node the launch file starts (`ABSOLUTE_TOPICS` in
@@ -705,21 +808,22 @@ and both are handled:
   every vehicle. Tools that need TF (e.g. RViz) must remap `/tf` and
   `/tf_static` to the vehicle's topics.
 
-Audit after adding nodes or packages: anything outside the vehicle
+Audit after adding nodes or packages (in a container shell, [Opening a ROS 2 shell](#opening-a-ros-2-shell)): anything outside the vehicle
 namespaces other than `/rosout` and `/parameter_events` (shared by design in
 ROS 2) and `/uas<N>/*` is shared by every vehicle and must be added to
 `ABSOLUTE_TOPICS`:
 
 ```bash
-hbros ros2 topic list | grep -vE '^/homebrew[0-9]+/|^/uas[0-9]+/|^/rosout$|^/parameter_events$'
+ros2 topic list | grep -vE '^/homebrew[0-9]+/|^/uas[0-9]+/|^/rosout$|^/parameter_events$'
 ```
 
 **One vehicle's data appears in another vehicle's topics**
 
-Check `hbros ros2 topic info -v` on the affected topic. If it has exactly one
+Check `ros2 topic info -v` on the affected topic (in a container shell,
+[Opening a ROS 2 shell](#opening-a-ros-2-shell)). If it has exactly one
 publisher in the right namespace, the mixing happens upstream of ROS — look
 at the `/uas<N>` link topics. Two vehicles on the same `/uas<N>` means their
-system IDs collide; see [3.4](#34-set-a-unique-mavlink-system-id). Otherwise
+system IDs collide; see [3.3](#33-flight-controller-parameters). Otherwise
 run the audit above.
 
 **Scaling to many vehicles.** Data only crosses Wi-Fi for topics something

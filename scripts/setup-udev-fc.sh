@@ -2,6 +2,11 @@
 
 # udev rule setup for Flight Controller USB device (FTDI)
 # This creates a persistent symlink so the device is always at /dev/ttyFC
+#
+#   sudo bash scripts/setup-udev-fc.sh <FTDI serial number>
+#
+# For the flight controller's Micro USB port instead of the FTDI cable:
+#   sudo VENDOR_ID=2dae PRODUCT_ID=1016 bash scripts/setup-udev-fc.sh 0
 
 set -e
 
@@ -19,10 +24,14 @@ fi
 echo -e "${GREEN}=== Flight Controller udev Rule Setup ===${NC}"
 echo ""
 
-# FTDI device info
-VENDOR_ID="0403"
-PRODUCT_ID="6001"
-SERIAL_NUM="PLACEHOLDER" # <-- You must change this!
+# FTDI device info (README 3.4 shows how to find the serial number)
+VENDOR_ID="${VENDOR_ID:-0403}"
+PRODUCT_ID="${PRODUCT_ID:-6001}"
+SERIAL_NUM="$1"
+if [ -z "$SERIAL_NUM" ]; then
+  echo -e "${RED}Usage: sudo bash $0 <FTDI serial number>${NC}"
+  exit 1
+fi
 SYMLINK_NAME="ttyFC"
 
 UDEV_RULES_FILE="/etc/udev/rules.d/99-flight-controller.rules"

@@ -87,11 +87,3 @@ echo "  Check status:     sudo systemctl status homebrew-docker.service"
 echo "  View logs:        sudo journalctl -u homebrew-docker.service -f"
 echo "  Disable autoboot: sudo systemctl disable homebrew-docker.service"
 echo ""
-echo -e "${YELLOW}Would you like to start the service now? (y/n)${NC}"
-read -r response
-if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    echo -e "${YELLOW}Starting service...${NC}"
-    sudo systemctl start homebrew-docker.service
-    sleep 2
-    sudo systemctl status homebrew-docker.service
-fi
