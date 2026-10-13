@@ -145,7 +145,7 @@ lsusb -v 2>/dev/null | grep -A20 -i stereolabs
 Using the 8-digit serial number:
 
 ```
-mkdir -p /config/zed
+mkdir -p config/zed
 ZED_SERIAL=${YOUR_ZED_SERIAL_NUMBER}
 curl -fL \
   "https://calib.stereolabs.com/?SN=${ZED_SERIAL}" \
@@ -212,49 +212,30 @@ Astros (see the astro_mavros README).
    ```
    MAVROS_TGT_SYSTEM=2
    ```
-3. Recreate the container:
+3. If the container is already running, recreate it (otherwise continue
+   with 3.5–3.7 first):
    ```
-   sudo docker compose up -d
+   sudo docker compose up -d --force-recreate
    ```
 
 The two values **must match**. If `MAVROS_TGT_SYSTEM` differs from the FCU's
 `MAV_SYS_ID`, MAVROS drops the FCU's messages and the vehicle's topics exist
 but stay silent.
 
-Verify from any machine on the network (see
-[Inspecting the ROS graph](#inspecting-the-ros-graph)):
+Verify once it is running (the `ros2` commands go through the container;
+see [Inspecting the ROS graph](#inspecting-the-ros-graph)):
 
 ```bash
-docker compose logs homebrew_bringup | grep -E "UAS Prefix|MY ID"
+sudo docker compose logs homebrew_bringup | grep -E "UAS Prefix|MY ID"
 #   UAS Prefix: /uas2
 #   MAVROS UAS via /uas2 started. MY ID 2.191, TARGET ID 2.1
-ros2 topic list | grep '^/uas'
+hbros ros2 topic list | grep '^/uas'
 ```
 
 Each `/uas<N>` pair should have exactly one vehicle's `mavros_router` and
-`mavros` nodes on it (`ros2 topic info -v /uas2/mavlink_source`).
+`mavros` nodes on it (`hbros ros2 topic info -v /uas2/mavlink_source`).
 
-### 3.5 Build the homebrew_bringup package
-
-> [!WARNING]
-> Nothing in the Dockerfile, `docker-compose.yml`, or `ros_entrypoint.sh` builds
-> `homebrew_ws` for you. `homebrew_ws` is bind-mounted into the container so you
-> can edit and rebuild without a full image rebuild — but that means **you must
-> build it yourself, once initially and again after any change to `homebrew_ws`
-> source**, or the container will crash-loop with `homebrew_bringup` not found.
-
-```bash
-cd homebrew_ws
-colcon build --packages-select homebrew_bringup
-```
-
-> [!WARNING]
-> Do not add `--symlink-install`. The host and the container see this same
-> directory at different absolute paths (`~/homebrew_docker/homebrew_ws` vs.
-> `/root/homebrew_ws`), and symlink-install bakes in whichever path was current
-> at build time — it'll work from one side and break from the other.
-
-### 3.6 Build and run
+### 3.5 Build the image
 
 Once per Jetson, before the first `up`, set up persistent logs and a unique
 machine ID ([6](#6-persistent-logs)); reboot if the script says so:
@@ -263,14 +244,86 @@ machine ID ([6](#6-persistent-logs)); reboot if the script says so:
 sudo ./scripts/setup-persistent-logs.sh
 ```
 
+Then build the image (from `homebrew_docker/`):
+
 ```bash
 sudo docker compose build
+```
+
+### 3.6 Build the homebrew_bringup package (inside the container)
+
+> [!WARNING]
+> Nothing in the Dockerfile, `docker-compose.yml`, or `ros_entrypoint.sh` builds
+> `homebrew_ws` for you. `homebrew_ws` is bind-mounted into the container so you
+> can edit and rebuild without a full image rebuild — but that means **you must
+> build it yourself, once initially and again after any change to `homebrew_ws`
+> source**, or the container will crash-loop with `homebrew_bringup` not found.
+
+The Jetson itself does not need ROS 2: build with the image's ROS, in a
+one-off container. From `homebrew_docker/`:
+
+```bash
+sudo docker compose run --rm --no-deps \
+  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  homebrew_bringup \
+  bash -c 'colcon build --packages-select homebrew_bringup; s=$?; chown -R "$HOST_UID:$HOST_GID" build install log; exit $s'
+```
+
+What this does, and why:
+
+- `docker compose run` starts a temporary container from the same service,
+  with the same image and mounts as the real one: `./homebrew_ws` on the host
+  is `/root/homebrew_ws` in the container, and the image's working directory
+  is `/root/homebrew_ws`. `colcon` therefore writes `build/`, `install/` and
+  `log/` into `homebrew_docker/homebrew_ws/` on the host, where the real
+  container finds them.
+- The image's entrypoint runs first and sources the image's ROS 2, MAVROS,
+  ZED and `ntrip_client` workspaces, so `colcon` is the image's. It prints
+  `Warning: /root/homebrew_ws has not been built yet` on the first build:
+  expected. It also waits for Wi-Fi (a default route), as on every start.
+- `--rm` deletes the temporary container afterwards; `--no-deps` starts
+  nothing else. It runs alongside a running `autonomypark-homebrew` without
+  touching it. `compose run` does not use `container_name` or the restart
+  policy, so it doesn't clash with the running container.
+- The container runs as root, so the `chown` hands the build output back to
+  your user (`$(id -u)`/`$(id -g)` are expanded by your shell before `sudo`).
+  The exit status is `colcon`'s.
+- `docker compose` checks the whole of `.env` even for this, so finish 3.1
+  first, and 3.2: it mounts `config/zed/SN${ZED_SERIAL}.conf`, and if that
+  file doesn't exist Docker creates an empty, root-owned *directory* with
+  that name (delete it with `sudo rmdir` before downloading the file).
+- Drop `--packages-select homebrew_bringup` to build every package in
+  `homebrew_ws/src`.
+
+Check that it worked: the build should end in
+`Summary: 1 package finished`, and
+
+```bash
+ls homebrew_ws/install/homebrew_bringup/share/homebrew_bringup/launch/
+```
+
+should list `homebrew.launch.py`.
+
+> [!NOTE]
+> Build only this way, even on a Jetson that has ROS 2 installed: the host
+> doesn't have the image's packages (MAVROS, `ntrip_client`, the ZED
+> wrapper), and mixing host and container builds in one `build/` directory
+> is untested. If `homebrew_ws` was previously built on the host, delete the
+> old output once first:
+> `sudo rm -rf homebrew_ws/build homebrew_ws/install homebrew_ws/log`.
+> Do not add `--symlink-install`.
+
+### 3.7 Run
+
+```bash
 sudo docker compose up -d
 ```
 
 If you edit anything under `homebrew_ws/src/` after this point (including
-after a `git pull`), re-run the `colcon build` command from 3.5 before
-`docker compose up -d`, or you'll get the crash loop described above again.
+after a `git pull`), re-run the build command from
+[3.6](#36-build-the-homebrew_bringup-package-inside-the-container), then
+`sudo docker compose up -d --force-recreate` (a plain `up -d` does not restart
+an unchanged container, so it would keep running the old launch file).
 
 ## 4. Optional: Auto-Start on Boot
 
@@ -298,9 +351,10 @@ sends them to the FCU. No ground-station MAVProxy is needed.
    DroneCAN GPS, so PX4 must forward RTCM onto the CAN bus.
 2. Set the `NTRIP_*` values in `.env` to the caster (for the Emlid base's
    local caster: its IP, port 2101, mountpoint, username and password).
-3. Before takeoff, check the fix:
+3. Before takeoff, check the fix (through the container, see
+   [Inspecting the ROS graph](#inspecting-the-ros-graph)):
    ```bash
-   ros2 topic echo /<namespace>/gpsstatus/gps1/raw --field fix_type
+   hbros ros2 topic echo --once /<namespace>/gpsstatus/gps1/raw --field fix_type
    ```
    `6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
 
@@ -405,8 +459,9 @@ MAVROS used ~0.26 of a core. Before flying on `minimal`, confirm outdoors with
 an RTK fix that `global_position/local`, `global_position/global` and RTK
 corrections (`gpsstatus/gps1/raw` reaching fix type 6) all work.
 
-After changing it, rebuild `homebrew_bringup` (3.5) if the launch file changed,
-then `docker compose up -d`. To check which plugins loaded:
+After changing it, rebuild `homebrew_bringup`
+([3.6](#36-build-the-homebrew_bringup-package-inside-the-container)) if the
+launch file changed, then `sudo docker compose up -d --force-recreate`. To check which plugins loaded:
 
 ```bash
 grep -oE "Plugin [a-z_0-9]+ initialized" logs/ros/mavros_node_*.log | sort | uniq -c
@@ -504,8 +559,7 @@ vehicle; PX4 v1.16.2 stock topic list):
 
    ```bash
    journalctl CONTAINER_NAME=autonomypark-homebrew -b | grep -i "session established"
-   docker exec -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-     autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list | grep fmu
+   hbros ros2 topic list | grep fmu
    ```
 
    Expect `/<namespace>/fmu/out/...` and `/<namespace>/fmu/in/...` (51 topics
@@ -593,21 +647,40 @@ sudo systemctl status docker.service
 
 ### Inspecting the ROS graph
 
-Run ROS 2 commands through the container's entrypoint, which sources every
-workspace and applies the discovery server profile, and select the
-`SUPER_CLIENT` profile. The vehicle's nodes run as plain discovery-server
-`CLIENT`s, which only receive discovery data for topics they use; a `ros2`
-command run the same way would see an almost empty graph.
+The Jetson has no ROS 2 of its own: run `ros2` commands inside the running
+container, through its entrypoint, which sources every workspace and applies
+the discovery-server profile. Select the `SUPER_CLIENT` profile: the
+vehicle's nodes run as plain discovery-server `CLIENT`s, which only receive
+discovery data for topics they use, so a `ros2` command run as one would see
+an almost empty graph.
+
+For an interactive shell (Ctrl-C works; `exit` to leave):
 
 ```bash
-docker exec -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh ros2 topic list
+sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
 ```
 
-The `ros2` daemon keeps the profile it was started with. If commands see an
-empty graph, run `ros2 daemon stop` the same way and retry.
+For one-off commands from the host, define this once per login shell (or add
+it to `~/.bashrc`); the rest of this README uses it:
 
-Useful commands:
+```bash
+hbros() {
+  sudo docker exec -i -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
+    autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh "$@"
+}
+hbros ros2 topic list
+```
+
+`hbros` has no terminal attached, so Ctrl-C stops `docker exec` but can leave
+the command running in the container: give commands that never end a limit,
+e.g. `hbros timeout 10 ros2 topic hz <topic>` or `ros2 topic echo --once`.
+`autonomypark-homebrew` is `CONTAINER_NAME` from `.env`.
+
+The `ros2` daemon keeps the profile it was started with. If commands see an
+empty graph, run `hbros ros2 daemon stop` and retry.
+
+Useful commands (inside the interactive shell, or prefixed with `hbros`):
 
 ```bash
 ros2 topic info -v <topic>   # which nodes (and namespaces) publish/subscribe
@@ -638,12 +711,12 @@ ROS 2) and `/uas<N>/*` is shared by every vehicle and must be added to
 `ABSOLUTE_TOPICS`:
 
 ```bash
-ros2 topic list | grep -vE '^/homebrew[0-9]+/|^/uas[0-9]+/|^/rosout$|^/parameter_events$'
+hbros ros2 topic list | grep -vE '^/homebrew[0-9]+/|^/uas[0-9]+/|^/rosout$|^/parameter_events$'
 ```
 
 **One vehicle's data appears in another vehicle's topics**
 
-Check `ros2 topic info -v` on the affected topic. If it has exactly one
+Check `hbros ros2 topic info -v` on the affected topic. If it has exactly one
 publisher in the right namespace, the mixing happens upstream of ROS — look
 at the `/uas<N>` link topics. Two vehicles on the same `/uas<N>` means their
 system IDs collide; see [3.4](#34-set-a-unique-mavlink-system-id). Otherwise
