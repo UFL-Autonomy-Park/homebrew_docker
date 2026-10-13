@@ -109,6 +109,7 @@ git switch autonomypark/humble-v5.0.0
 Build the ROS 2 Humble, ZED SDK v5.0.0, L4T r36.3.0 base image:
 
 ```bash
+sudo docker buildx bake --allow=network.host -f docker-compose.yml
 sudo ./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
 	l4t-r36.3.0 \
 	zedsdk-5.0.0
@@ -211,7 +212,10 @@ Astros (see the astro_mavros README).
    ```
    MAVROS_TGT_SYSTEM=2
    ```
-3. Recreate the container (`docker compose up -d`).
+3. Recreate the container:
+   ```
+   sudo docker compose up -d
+   ```
 
 The two values **must match**. If `MAVROS_TGT_SYSTEM` differs from the FCU's
 `MAV_SYS_ID`, MAVROS drops the FCU's messages and the vehicle's topics exist
