@@ -42,3 +42,13 @@
       - setpoint_raw
       # setpoint_velocity/cmd_vel (px4_teleop)
       - setpoint_velocity
+      # distance_sensor/<name>: downward lidar (autonomy_test safety checks).
+      # Topic names come from px4_config.yaml, keyed by the DISTANCE_SENSOR id
+      # PX4 sends (the sensor's instance number, from 0): id 0 ->
+      # distance_sensor/hrlv_ez4_pub. On homebrew05 the LW20 is id 0, the only
+      # distance sensor (2026-10-14). Upstream's PX4 list denies this plugin,
+      # so full_pluginlists.yaml does not load it either.
+      - distance_sensor
+      # px4flow/raw/optical_flow_rad: optical flow (OPTICAL_FLOW_RAD, 10 Hz;
+      # autonomy_test safety checks)
+      - px4flow

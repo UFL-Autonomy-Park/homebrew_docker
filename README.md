@@ -646,7 +646,7 @@ about 60, each with its own ROS node, topics, services and startup requests to
 the FCU. `MAVROS_PLUGINS` in `.env` picks a list from `config/mavros/`:
 
 - `full` (default): the upstream PX4 list, all plugins but five.
-- `minimal`: the 12 plugins that `autonomy_park_sitl`'s `ros2_ws` uses, RTK
+- `minimal`: the 14 plugins that `autonomy_park_sitl`'s `ros2_ws` uses, RTK
   needs, and those depend on. Each entry in
   `config/mavros/minimal_pluginlists.yaml` is commented with the topics and
   services it provides.
