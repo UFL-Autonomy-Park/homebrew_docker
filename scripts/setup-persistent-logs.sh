@@ -9,6 +9,8 @@
 #   1. journald stores the system journal on disk instead of in RAM. With
 #      docker-compose.yml's journald logging driver, the container's output
 #      lands there too, next to kernel messages (USB, throttling, segfaults).
+#      It saves to disk every second instead of every 5 minutes, so a battery
+#      pull or crash loses about the last second of logs (README 6).
 #   2. systemd-coredump collects core dumps (including from processes inside
 #      the container) instead of apport, which ignores them.
 # Safe to re-run.
@@ -47,12 +49,13 @@ if [ "$(readlink /var/lib/dbus/machine-id)" != "/etc/machine-id" ]; then
     ln -sf /etc/machine-id /var/lib/dbus/machine-id
 fi
 
-echo -e "${YELLOW}[2/3] journald: persistent storage, capped at 2 GB...${NC}"
+echo -e "${YELLOW}[2/3] journald: persistent storage, capped at 2 GB, saved every 1 s...${NC}"
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/50-homebrew-persistent.conf <<'EOF'
 [Journal]
 Storage=persistent
 SystemMaxUse=2G
+SyncIntervalSec=1s
 EOF
 mkdir -p /var/log/journal
 systemd-tmpfiles --create --prefix /var/log/journal

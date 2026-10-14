@@ -582,6 +582,23 @@ down`. Three pieces fix this:
 Set up by `scripts/setup-persistent-logs.sh` in [3.2](#32-persistent-logs-and-machine-id),
 followed by a reboot.
 
+**Power loss (battery pull, crash).** The journal keeps new messages in
+memory and saves them to disk periodically; whatever is not saved yet when
+power is cut is lost. Ubuntu's default saves every 5 minutes (plus Linux's own
+write-out after about 30 s), so the last tens of seconds before a crash could
+be missing. The script sets `SyncIntervalSec=1s`: the journal is saved every
+second. Measured on homebrew05 (2026-10-14, one battery pull, a numbered
+message logged every 0.2 s and also sent to the lab PC over SSH): the last
+saved message was 0.4–0.6 s before power was cut. The cost is one disk sync
+per second of a few KB (the journal grows by about 3 KB/s), done by
+journald, not by the ROS nodes.
+
+> [!NOTE]
+> Files in `logs/ros/` are ordinary files and are **not** covered by this
+> setting: Linux writes them out after about 30 s (`vm.dirty_expire_centisecs`).
+> After a crash, the journal is the more complete record of the final
+> seconds. The PX4 flight log on the flight controller's SD card is separate.
+
 The script also gives the Jetson its own **machine ID**. Jetsons flashed from
 the same image share one (`5dbfb124...` on the homebrews), so their journals
 land in identically named `/var/log/journal/<machine-id>` directories, and
@@ -607,6 +624,16 @@ grep -a "has died" logs/ros/*/launch.log
 # Core dumps
 coredumpctl list
 ```
+
+> [!WARNING]
+> After a battery pull the Jetson boots with its clock at 1970, which can
+> make `-b -1` pick the **wrong boot** (seen on homebrew05). To read an
+> earlier boot reliably, list the boots and pass the boot ID (second column):
+>
+> ```bash
+> journalctl --list-boots | tail -5
+> journalctl -b <boot ID> -o short-monotonic
+> ```
 
 `logs/ros/` is written by root from inside the container, so deleting old
 logs needs `sudo rm -rf logs/ros/<dir>`. It grows by a few MB per session; the
