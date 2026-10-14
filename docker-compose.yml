@@ -5,7 +5,12 @@ x-homebrew-common: &homebrew-common
   network_mode: host
   ipc: host
   privileged: true
+  # The entrypoint is mounted from the repo so changes to it apply on the next
+  # `docker compose up -d` without rebuilding the image. Run through bash so a
+  # checkout that lost the file's executable bit still starts.
+  entrypoint: ["/bin/bash", "/sbin/homebrew_ros_entrypoint.sh"]
   volumes:
+    - ./docker/ros_entrypoint.sh:/sbin/homebrew_ros_entrypoint.sh:ro
     - /dev:/dev
     - ./homebrew_ws:/root/homebrew_ws
     - ./config/fastdds:/etc/fastdds:ro

@@ -93,17 +93,101 @@ sudo systemctl show docker --property=Environment
 
 The last command should print `Environment=DOCKER_INSECURE_NO_IPTABLES_RAW=1`.
 
-### 1.6 Reboot
+### 1.6 Disable the firewall
+
+> [!WARNING]
+> Some Jetson images ship with the `ufw` firewall **enabled**, dropping all
+> incoming traffic except SSH and ping. ROS 2 then fails silently: the
+> vehicle's nodes reach the discovery server, but the server's replies are
+> dropped, so no other computer ever sees the vehicle's topics. Ping and SSH
+> still work, so nothing looks wrong. Run this block on every Jetson, even if
+> you think the firewall is off.
+
+```bash
+sudo ufw disable
+sudo ufw status
+```
+
+`ufw status` should print `Status: inactive`. This setting survives reboots.
+
+> [!NOTE]
+> On homebrew05 the firewall was first worked around with
+> `sudo ufw allow from 192.168.1.0/24`, which lets in everything from the lab
+> network. Disabling the firewall is simpler and also works on any other
+> network.
+
+### 1.7 Disable Wi-Fi power saving
+
+By default NetworkManager turns on Wi-Fi power saving
+(`/etc/NetworkManager/conf.d/default-wifi-powersave-on.conf`). The radio then
+sleeps between the router's beacons. The router holds incoming packets until
+the radio wakes, which adds delay and bursts to everything sent **to** the
+vehicle: commands, setpoints, RTK corrections and discovery. On a vehicle the
+Wi-Fi radio's power is negligible next to the motors. This file overrides the
+default (files in `conf.d` load in name order, later ones win) and takes
+effect at the reboot in 1.9:
+
+```bash
+printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/zz-wifi-powersave-off.conf
+NetworkManager --print-config | grep -E "Failed|etc:|powersave"
+```
+
+The second command only reads the configuration; Wi-Fi stays up. It must show
+`zz-wifi-powersave-off.conf` in the `etc:` list and `wifi.powersave=2`.
 
 > [!CAUTION]
-> **Reboot now**, so the hostname applies everywhere. Your SSH session drops;
-> wait about a minute and SSH back in (1.1).
+> If it prints `Failed to read configuration`, **do not reboot**:
+> NetworkManager refuses to start with an unreadable file in `conf.d`, and the
+> Jetson comes back with no Wi-Fi. Delete the file and check it is gone (a
+> plain `rm` without `sudo` silently leaves it in place):
+> ```bash
+> sudo rm /etc/NetworkManager/conf.d/zz-wifi-powersave-off.conf
+> ls /etc/NetworkManager/conf.d/
+> ```
+
+### 1.8 Time sync with chrony
+
+Every computer that runs ROS 2 nodes uses chrony, synced to the lab time
+server on the discovery server (192.168.1.201). Message ages are computed
+across machines, so their clocks must agree, and chrony only steps the clock
+in its first few updates after boot; afterwards it slews it gradually instead
+of jumping it. The full guide, including the server and how to undo
+everything, is [docs/TIME_SYNC.md](docs/TIME_SYNC.md).
+
+Installing chrony removes `systemd-timesyncd` (the two packages conflict):
+
+```bash
+sudo apt-get install -y chrony
+printf 'server 192.168.1.201 iburst prefer\n' | sudo tee /etc/chrony/conf.d/lab-time-server.conf
+sudo systemctl restart chrony
+sleep 30
+chronyc sources
+```
+
+The `192.168.1.201` line should start with `^*` (selected source).
+
+### 1.9 Reboot
+
+> [!CAUTION]
+> **Reboot now**, so the hostname and the Wi-Fi setting apply everywhere. Your
+> SSH session drops; wait about a minute and SSH back in (1.1).
 
 ```bash
 sudo reboot
 ```
 
-### 1.7 Update the router IP reservation
+After you SSH back in:
+
+```bash
+hostname
+/sbin/iw dev wlan0 get power_save
+chronyc tracking | grep -E "Reference ID|Stratum|System time"
+```
+
+Expect `homebrew-jetson-05` (with your number), `Power save: off`, and a
+`Reference ID` of `C0A801C9 (192.168.1.201)`.
+
+### 1.10 Update the router IP reservation
 
 Log in to the router and fix the IP address. Log this in the IP reservations
 document in the Autonomy Park Google Drive.
@@ -124,7 +208,6 @@ Build the ROS 2 Humble, ZED SDK v5.0.0, L4T r36.3.0 base image:
 
 ```bash
 cd ~/zed_ros2_wrapper_jetson
-sudo docker buildx bake --allow=network.host -f docker-compose.yml
 sudo ./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
 	l4t-r36.3.0 \
 	zedsdk-5.0.0
@@ -196,6 +279,8 @@ In QGroundControl (Vehicle Setup → Parameters), set:
 | `SER_TEL2_BAUD` | `921600 8N1` | must match `FCU_URL` in `.env` |
 | `UXRCE_DDS_CFG` | `Disabled` | TELEM2 is MAVROS's ([8](#8-flight-controller-bridge-mavros-or-micro-xrce-dds-agent)) |
 | `UAVCAN_PUB_RTCM` | `Enabled` | forwards RTK corrections to the Here4 ([5](#5-rtk-corrections)) |
+| `COM_OF_LOSS_T` | `0.5` s | offboard setpoints missing this long trigger the offboard-loss action (default 1.0 s) |
+| `COM_OBL_RC_ACT` | `Land` (4) | offboard-loss action; does not depend on the Jetson or Wi-Fi |
 
 Then reboot the flight controller (Vehicle Setup → Parameters → Tools →
 Reboot Vehicle). `MAV_SYS_ID` only takes effect after a reboot.
@@ -285,12 +370,25 @@ For homebrew05 this shows `MAVROS_NAMESPACE=homebrew05`,
 
 ### 3.7 Build the image
 
-Takes a while (it builds MAVROS and the Micro XRCE-DDS Agent from source).
+Takes about 45 minutes (it builds MAVROS and the Micro XRCE-DDS Agent from
+source).
+
+> [!WARNING]
+> Build with **this exact command**, never `docker compose build` or
+> `docker compose up --build`. The build needs host networking
+> (`build.network: host` in `docker-compose.yml`). Docker Compose v5 builds
+> through Bake, which refuses host networking unless it is granted with
+> `--allow=network.host`, and `docker compose build` has no way to grant it.
+> Run it from `~/homebrew_docker` so the image gets the name and tag
+> `docker-compose.yml` expects.
 
 ```bash
 cd ~/homebrew_docker
-sudo docker compose build
+sudo docker buildx bake --allow=network.host -f docker-compose.yml
+sudo docker images ufl-autonomy-park/homebrew-jetson
 ```
+
+The last command should list the image with tag `dev`.
 
 ### 3.8 Build the homebrew_bringup package
 
@@ -355,23 +453,18 @@ sudo docker compose logs homebrew_bringup | grep -E "Got HEARTBEAT|UAS Prefix|MY
 Expect `CON: Got HEARTBEAT, connected`, `UAS Prefix: /uas5` and
 `MY ID 5.191, TARGET ID 5.1` (with your number).
 
-Now open a shell in the **running** container. This command is different from
-3.8's: it attaches to the live container and selects the discovery-server
-profile that can see the whole ROS graph:
+The rest of the check runs on the **lab PC**, not on the Jetson.
+
+> [!IMPORTANT]
+> Open a **new terminal on the lab PC**. The SSH session is on the Jetson; do
+> not type these commands there. Replace `05` with the number you used in
+> 1.4.
 
 ```bash
-sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
-```
-
-In the **container's** shell:
-
-```bash
-NUMBER=$(hostname | grep -oE '[0-9]+$')
+NUMBER=05
 ros2 topic echo --once /homebrew$NUMBER/state --field connected
 ros2 topic echo --once /homebrew$NUMBER/gpsstatus/gps1/raw --field fix_type
 ros2 topic info /uas$((10#$NUMBER))/mavlink_source
-exit
 ```
 
 | Command | Expected |
@@ -432,18 +525,12 @@ GPS, so PX4 must forward RTCM onto the CAN bus) and `.env` (the `NTRIP_*`
 values point at the Emlid base's local caster: IP, port 2101, mountpoint,
 username and password).
 
-**Before every takeoff, check the fix.** On the Jetson:
+**Before every takeoff, check the fix.** In a terminal on the **lab PC**
+(replace `05` with the vehicle's number):
 
 ```bash
-sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
-```
-
-In the **container's** shell:
-
-```bash
-ros2 topic echo --once /homebrew$(hostname | grep -oE '[0-9]+$')/gpsstatus/gps1/raw --field fix_type
-exit
+NUMBER=05
+ros2 topic echo --once /homebrew$NUMBER/gpsstatus/gps1/raw --field fix_type
 ```
 
 `6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
@@ -589,8 +676,8 @@ The Jetson can talk to the flight controller in one of two ways:
 The image includes the agent pinned at **v2.4.3** and `px4_msgs` pinned at
 **v1.16.2**, matching the vehicles' PX4 firmware. `px4_msgs` must match the
 firmware's message definitions; if the firmware is upgraded, bump
-`PX4_MSGS_VERSION` in `docker/Dockerfile` and rebuild the image. Building the
-agent adds roughly 15–20 minutes to `docker compose build`.
+`PX4_MSGS_VERSION` in `docker/Dockerfile` and rebuild the image (3.7). Building the
+agent adds roughly 15–20 minutes.
 
 Measured on homebrew02/03 (outdoors, 20 container restarts per bridge per
 vehicle; PX4 v1.16.2 stock topic list):
@@ -651,15 +738,15 @@ vehicle; PX4 v1.16.2 stock topic list):
 
    ```bash
    journalctl CONTAINER_NAME=autonomypark-homebrew -b | grep -i "session established"
-   sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-     autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
    ```
 
-   In the **container's** shell:
+   Then in a terminal on the **lab PC** (replace `05` with the vehicle's
+   number):
 
    ```bash
-   ros2 topic list | grep fmu
-   exit
+   NUMBER=05
+   ros2 topic list | grep "^/homebrew$NUMBER/fmu/" | wc -l
+   ros2 topic list | grep "^/homebrew$NUMBER/fmu/" | head
    ```
 
    Expect `/<namespace>/fmu/out/...` and `/<namespace>/fmu/in/...` (51 topics
@@ -758,29 +845,12 @@ sudo systemctl status docker.service
 > Always double-check the discovery server IP in both
 > `config/fastdds/client_config.xml` and `config/fastdds/super_client_config.xml`.
 
-### Opening a ROS 2 shell
+### Inspecting the ROS graph from the lab PC
 
-The Jetson has no ROS 2: `ros2` and `colcon` exist only inside the container.
-From your SSH session on the Jetson, open a shell in the **running**
-container:
-
-```bash
-sudo docker exec -it -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
-  autonomypark-homebrew /sbin/homebrew_ros_entrypoint.sh bash
-```
-
-`exit` returns to the Jetson. The entrypoint loads every workspace, so `ros2`
-works; a plain `docker exec -it autonomypark-homebrew bash` skips it and
-`ros2` is not found. The `FASTRTPS_PROFILE_PATH` selects the `SUPER_CLIENT`
-discovery profile on purpose: the vehicle's nodes run as plain
-discovery-server `CLIENT`s, which only receive discovery data for topics they
-use, so a `ros2` command run as one would see an almost empty graph. If the
-container isn't running (e.g. crash-looping), use the build shell from 3.8
-instead: `sudo docker compose run --rm homebrew_bringup bash` (from
-`~/homebrew_docker`).
-
-The `ros2` daemon keeps the profile it was started with. If commands see an
-empty graph, run `ros2 daemon stop` in the shell and retry.
+Run `ros2` commands on the **lab PC**, not on the Jetson. The Jetson has no
+ROS 2. The only `ros2`/`colcon` use on the Jetson is
+building `homebrew_ws` in the build shell (3.8 and
+[After setup](#after-setup-changing-homebrew_ws)).
 
 Useful commands:
 
@@ -790,6 +860,22 @@ ros2 topic info -v <topic>   # which nodes (and namespaces) publish/subscribe
 ros2 topic hz <topic>        # is anything actually arriving? (Ctrl-C to stop)
 ros2 param get <node> <param>
 ```
+
+### No topics from a vehicle on the lab PC
+
+The container is running, the logs show `Got HEARTBEAT, connected`, but
+`ros2 topic list` on the lab PC shows nothing from the vehicle. Check whether
+the Jetson's firewall is dropping the discovery server's replies. On the
+Jetson:
+
+```bash
+sudo ufw status verbose
+journalctl -k -b | grep "UFW BLOCK" | grep "SRC=192.168.1.201" | tail -5
+```
+
+Any `UFW BLOCK` lines from `192.168.1.201` mean the firewall is the cause. Run
+1.6, then wait about 30 seconds: the nodes keep retrying, so no restart is
+needed.
 
 ### Multiple vehicles on one network
 
@@ -808,7 +894,7 @@ and both are handled:
   every vehicle. Tools that need TF (e.g. RViz) must remap `/tf` and
   `/tf_static` to the vehicle's topics.
 
-Audit after adding nodes or packages (in a container shell, [Opening a ROS 2 shell](#opening-a-ros-2-shell)): anything outside the vehicle
+Audit after adding nodes or packages (on the lab PC, [Inspecting the ROS graph](#inspecting-the-ros-graph-from-the-lab-pc)): anything outside the vehicle
 namespaces other than `/rosout` and `/parameter_events` (shared by design in
 ROS 2) and `/uas<N>/*` is shared by every vehicle and must be added to
 `ABSOLUTE_TOPICS`:
@@ -819,8 +905,8 @@ ros2 topic list | grep -vE '^/homebrew[0-9]+/|^/uas[0-9]+/|^/rosout$|^/parameter
 
 **One vehicle's data appears in another vehicle's topics**
 
-Check `ros2 topic info -v` on the affected topic (in a container shell,
-[Opening a ROS 2 shell](#opening-a-ros-2-shell)). If it has exactly one
+Check `ros2 topic info -v` on the affected topic (on the lab PC,
+[Inspecting the ROS graph](#inspecting-the-ros-graph-from-the-lab-pc)). If it has exactly one
 publisher in the right namespace, the mixing happens upstream of ROS — look
 at the `/uas<N>` link topics. Two vehicles on the same `/uas<N>` means their
 system IDs collide; see [3.3](#33-flight-controller-parameters). Otherwise
@@ -838,14 +924,26 @@ Fast DDS chooses which network addresses to advertise when a node starts and
 never re-scans. If ROS starts before Wi-Fi connects, the vehicle's nodes run
 but are invisible to everything else, including `ros2` commands in its own
 container. The entrypoint prevents this by waiting up to
-`NETWORK_WAIT_TIMEOUT` seconds (default 120) for a default route (Wi-Fi up);
-if none appears it exits and Docker restarts the container. It also
-waits up to `CLOCK_WAIT_TIMEOUT` seconds (default 60) for NTP to set the
-clock, since the Jetsons boot at 1970. Check with:
+`NETWORK_WAIT_TIMEOUT` seconds (default 120) for `wlan0` to have an IPv4
+address and a default route; if not, it exits and Docker restarts the
+container. It then waits up to `CLOCK_WAIT_TIMEOUT` seconds (default 60) until
+the clock agrees with the lab time server (192.168.1.201, within 10 ms, on 3
+checks in a row; see [docs/TIME_SYNC.md](docs/TIME_SYNC.md)). If the server
+cannot be reached in time it logs a `WARNING` and starts anyway. Check with:
 
 ```bash
-docker compose logs homebrew_bringup | grep -E "No default route|clock"
+cd ~/homebrew_docker
+sudo docker compose logs homebrew_bringup | grep -E "Network up|No IPv4|Clock|WARNING"
 ```
+
+Expect a `Network up` line and a `Clock in sync with 192.168.1.201` line.
+
+> [!NOTE]
+> Docker's restart policy (`restart: unless-stopped`) starts the container as
+> soon as Docker starts if the container still exists, i.e. after the vehicle
+> was powered off without a shutdown (battery unplugged). A clean shutdown
+> removes it (`homebrew-docker.service` runs `docker compose down`). Either
+> way the entrypoint waits for the network and the clock first.
 
 If a vehicle's IP address changes while the container is running (e.g. its
 router reservation is missing), restart the container.
