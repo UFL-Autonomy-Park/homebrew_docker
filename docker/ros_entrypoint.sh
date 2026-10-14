@@ -124,9 +124,9 @@ echo "Network up: ${NETWORK_INTERFACE} has an IPv4 address and a default route (
 #   - TIME_SERVER answers NTP with a valid reply, and
 #   - this clock is within CLOCK_MAX_OFFSET_MS of it (offset + delay/2, the
 #     worst case given the network delay).
-# The lab network may be unreachable in the field, so after CLOCK_WAIT_TIMEOUT
-# seconds warn and start anyway: the flight nodes check sync themselves before
-# arming.
+# ROS never starts on an unsynced clock: if the clock is not confirmed within
+# CLOCK_WAIT_TIMEOUT seconds, exit non-zero so the restart policy retries. No
+# topics is an obvious failure; topics with wrong stamps are not.
 read -r -d '' CLOCK_CHECK_PY <<'EOF' || true
 import ctypes, socket, struct, sys, time
 server, max_ms = sys.argv[1], float(sys.argv[2])
@@ -182,14 +182,12 @@ while (( clock_ok < 3 )); do
     fi
     if (( clock_ok < 3 )); then
         if (( $(uptime_s) - clock_start >= CLOCK_WAIT_TIMEOUT )); then
-            echo "WARNING: clock not confirmed in sync with ${TIME_SERVER} after ${CLOCK_WAIT_TIMEOUT}s (last check: ${clock_status}). Starting anyway; ages computed against other machines' clocks may be wrong." >&2
-            break
+            echo "Clock not confirmed in sync with ${TIME_SERVER} after ${CLOCK_WAIT_TIMEOUT}s (last check: ${clock_status}); exiting so Docker restarts the container. ROS is not started." >&2
+            exit 1
         fi
         sleep 1
     fi
 done
-if (( clock_ok >= 3 )); then
-    echo "Clock in sync with ${TIME_SERVER} (uptime $(uptime_s)s, 3 consecutive checks; last: ${clock_status})."
-fi
+echo "Clock in sync with ${TIME_SERVER} (uptime $(uptime_s)s, 3 consecutive checks; last: ${clock_status})."
 
 exec "$@"

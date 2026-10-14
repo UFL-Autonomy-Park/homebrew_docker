@@ -923,27 +923,48 @@ them. RTCM is ~0.5–1 KB/s per vehicle at 1 Hz, but see the caster limit in
 Fast DDS chooses which network addresses to advertise when a node starts and
 never re-scans. If ROS starts before Wi-Fi connects, the vehicle's nodes run
 but are invisible to everything else, including `ros2` commands in its own
-container. The entrypoint prevents this by waiting up to
-`NETWORK_WAIT_TIMEOUT` seconds (default 120) for `wlan0` to have an IPv4
-address and a default route; if not, it exits and Docker restarts the
-container. It then waits up to `CLOCK_WAIT_TIMEOUT` seconds (default 60) until
-the clock agrees with the lab time server (192.168.1.201, within 10 ms, on 3
-checks in a row; see [docs/TIME_SYNC.md](docs/TIME_SYNC.md)). If the server
-cannot be reached in time it logs a `WARNING` and starts anyway. Check with:
+container. Before starting ROS, the entrypoint waits for two things:
+
+1. **Network:** `wlan0` has an IPv4 address and a default route.
+2. **Clock:** the clock agrees with the lab time server (192.168.1.201)
+   within 10 ms on 3 checks in a row
+   (see [docs/TIME_SYNC.md](docs/TIME_SYNC.md)).
+
+> [!IMPORTANT]
+> **No time server, no ROS.** If either wait times out
+> (`NETWORK_WAIT_TIMEOUT`, default 120 s; `CLOCK_WAIT_TIMEOUT`, default 60 s),
+> the container exits without starting ROS and Docker restarts it, which
+> repeats until both pass. A vehicle that cannot reach the discovery server
+> (192.168.1.201) therefore publishes **no topics at all**. This is on
+> purpose: topics stamped by a wrong clock look like a working vehicle.
+
+Check with:
 
 ```bash
 cd ~/homebrew_docker
-sudo docker compose logs homebrew_bringup | grep -E "Network up|No IPv4|Clock|WARNING"
+sudo docker compose logs homebrew_bringup | grep -E "Network up|No IPv4|Clock"
 ```
 
 Expect a `Network up` line and a `Clock in sync with 192.168.1.201` line.
+Repeated `Clock not yet in sync` lines ending in `ROS is not started` mean the
+vehicle cannot get time from the discovery server. On the vehicle:
+
+```bash
+chronyc sources
+```
+
+The `192.168.1.201` line must start with `^*`. If it does not, check that the
+discovery server is on and reachable (`ping -c 3 192.168.1.201`) and that
+chrony runs there (`chronyc tracking` on the server; docs/TIME_SYNC.md §1).
 
 > [!NOTE]
 > Docker's restart policy (`restart: unless-stopped`) starts the container as
 > soon as Docker starts if the container still exists, i.e. after the vehicle
 > was powered off without a shutdown (battery unplugged). A clean shutdown
 > removes it (`homebrew-docker.service` runs `docker compose down`). Either
-> way the entrypoint waits for the network and the clock first.
+> way the entrypoint waits for the network and the clock first. After a
+> battery pull the Jetson's clock starts at 1970 and is corrected about 20 s
+> after boot; ROS starts after that.
 
 If a vehicle's IP address changes while the container is running (e.g. its
 router reservation is missing), restart the container.

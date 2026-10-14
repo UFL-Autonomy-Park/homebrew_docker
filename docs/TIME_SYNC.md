@@ -18,6 +18,10 @@ Why:
   updates after starting (`makestep 1 3` in Ubuntu's default config: steps
   larger than 1 s, only in the first three updates) and slews it gradually
   afterwards. A jump while MAVROS runs makes it reset its time sync.
+  After a battery pull a Jetson boots with its clock at 1970 (homebrew05,
+  2026-10-14: chrony stepped it forward 56.8 years, 22.6 s after boot), so
+  the homebrew container's entrypoint waits until the clock agrees with the
+  time server before starting ROS.
 - Ubuntu's server documentation recommends chrony for serving NTP;
   `systemd-timesyncd`, the default client, implements SNTP only and cannot
   serve time.
