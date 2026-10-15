@@ -13,80 +13,67 @@ ENV EXPERIMENT_WS=/root/experiment_ws
 
 SHELL ["/bin/bash", "-c"]
 
-# Make folders
-RUN mkdir -p ${HOMEBREW_WS}
-RUN mkdir -p ${EXPERIMENT_WS}
-
-# Build tools for the packages built from source below (ntrip_client, px4_msgs)
-RUN apt-get update
-RUN apt-get install -y --no-install-recommends git python3-colcon-common-extensions
-
-# MAVROS 2.16.0 from the ROS apt repo, pinned to exact builds for arm64 (the
-# Jetsons; the build stamps differ per architecture, so any other architecture
-# fails here on purpose).
+# MAVROS (with mavros_msgs, mavros_extras, libmavconn), built from source at a
+# pinned tag and installed alongside the base image's ROS 2.
 #
-# The ROS apt repo keeps only the newest build of each package. When a newer
-# one is published, these versions disappear and this step FAILS instead of
-# silently installing a different MAVROS. MAVROS renames topics between
-# versions (2.15 moved everything under <namespace>/mavros/), so before
-# changing the versions: read MAVROS's CHANGELOG.rst, check the topic names
-# the autonomy_park_sitl stack uses, then update all four together. Current
-# versions: `apt-cache policy ros-humble-mavros` in a container from this base
-# image. apt-mark hold keeps later layers from changing them.
+# Not from apt: the base image's ROS 2 is built from source
+# (dustynv/ros:humble-ros-base, under /opt/ros/humble/install) and unknown
+# to dpkg, so apt-installing ros-humble-mavros would also install a second
+# ROS 2 (rclcpp, rmw, messages, ...) from apt into /opt/ros/humble, mixed
+# with the first. (Until 2026-09-27 apt also lacked MAVROS altogether:
+# https://github.com/mavlink/mavros/issues/2293.)
 #
-# Until 2026-10-15 MAVROS 2.14.0 was built from source here, because of
-# https://github.com/mavlink/mavros/issues/2293 (binaries missing from apt;
-# closed 2026-09-27).
-ARG LIBMAVCONN_VERSION=2.16.0-1jammy.20260927.155237
-ARG MAVROS_VERSION=2.16.0-1jammy.20260927.163040
-ARG MAVROS_EXTRAS_VERSION=2.16.0-1jammy.20260927.170609
-ARG MAVROS_MSGS_VERSION=2.16.0-1jammy.20260927.155213
-RUN if [[ "$(dpkg --print-architecture)" != "arm64" ]]; then \
-        echo "ERROR: the MAVROS versions pinned here are arm64 builds; this is $(dpkg --print-architecture)." >&2; \
-        exit 1; \
-    fi && \
-    apt-get install -y --no-install-recommends \
-        ros-${ROS_DISTRO}-libmavconn=${LIBMAVCONN_VERSION} \
-        ros-${ROS_DISTRO}-mavros=${MAVROS_VERSION} \
-        ros-${ROS_DISTRO}-mavros-extras=${MAVROS_EXTRAS_VERSION} \
-        ros-${ROS_DISTRO}-mavros-msgs=${MAVROS_MSGS_VERSION} && \
-    apt-mark hold \
-        ros-${ROS_DISTRO}-libmavconn ros-${ROS_DISTRO}-mavros \
-        ros-${ROS_DISTRO}-mavros-extras ros-${ROS_DISTRO}-mavros-msgs
+# Each RUN is a new shell: `source` and `cd` only last within one RUN, so the
+# steps that need them stay joined with &&.
+#
+# MAVROS renames topics between versions (2.15 moved everything under
+# <namespace>/mavros/). Before changing the tag: read MAVROS's CHANGELOG.rst
+# and check the topic names the autonomy_park_sitl stack uses.
+ARG MAVROS_VERSION=2.16.0
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git python3-colcon-common-extensions && \
+    mkdir -p /tmp/mavros_src/src && \
+    git clone --branch ${MAVROS_VERSION} --depth 1 https://github.com/mavlink/mavros.git /tmp/mavros_src/src/mavros && \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    rosdep install --from-paths /tmp/mavros_src/src --ignore-src -r -y
 
-RUN source "/opt/ros/$ROS_DISTRO/setup.bash"
-RUN source "/root/ros2_ws/install/setup.bash"
-RUN ros2 run mavros install_geographiclib_datasets.sh
-RUN apt-get clean
-RUN rm -rf /var/lib/apt/lists/*
+RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    cd /tmp/mavros_src && \
+    colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO}
+
+RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
+    source "/root/ros2_ws/install/setup.bash" && \
+    ros2 run mavros install_geographiclib_datasets.sh && \
+    rm -rf /tmp/mavros_src && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ntrip_client (RTK corrections -> MAVROS gps_rtk), built from source at a
-# pinned tag
+# pinned tag, installed alongside MAVROS.
 # Patch: its 'fix' subscription is RELIABLE, which can't receive MAVROS's
 # BEST_EFFORT global_position/raw/fix, so it never sends the caster a GGA.
 # Subscribe with sensor-data QoS instead; the grep fails the build if a
 # version bump makes the sed a no-op.
 ARG NTRIP_CLIENT_VERSION=ros2-1.4.1
-RUN git clone --branch ${NTRIP_CLIENT_VERSION} --depth 1 https://github.com/LORD-MicroStrain/ntrip_client.git /tmp/ntrip_src/src/ntrip_client
-RUN sed -i "s/'fix', self.subscribe_fix, 10)/'fix', self.subscribe_fix, rclpy.qos.qos_profile_sensor_data)/" \
-        /tmp/ntrip_src/src/ntrip_client/scripts/ntrip_ros_base.py
-RUN grep -q "subscribe_fix, rclpy.qos.qos_profile_sensor_data)" /tmp/ntrip_src/src/ntrip_client/scripts/ntrip_ros_base.py
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash
-RUN rosdep install --from-paths /tmp/ntrip_src/src --ignore-src -y
-RUN cd /tmp/ntrip_src
-RUN colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO}
-RUN rm -rf /tmp/ntrip_src
-RUN apt-get clean
-RUN rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    git clone --branch ${NTRIP_CLIENT_VERSION} --depth 1 https://github.com/LORD-MicroStrain/ntrip_client.git /tmp/ntrip_src/src/ntrip_client && \
+    sed -i "s/'fix', self.subscribe_fix, 10)/'fix', self.subscribe_fix, rclpy.qos.qos_profile_sensor_data)/" \
+        /tmp/ntrip_src/src/ntrip_client/scripts/ntrip_ros_base.py && \
+    grep -q "subscribe_fix, rclpy.qos.qos_profile_sensor_data)" /tmp/ntrip_src/src/ntrip_client/scripts/ntrip_ros_base.py && \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    rosdep install --from-paths /tmp/ntrip_src/src --ignore-src -y && \
+    cd /tmp/ntrip_src && \
+    colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO} && \
+    rm -rf /tmp/ntrip_src && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # px4_msgs, pinned to the PX4 release the vehicles' flight controllers run.
 # uXRCE-DDS topics only deserialize if these definitions match the firmware's.
 ARG PX4_MSGS_VERSION=v1.16.2
-RUN git clone --branch ${PX4_MSGS_VERSION} --depth 1 https://github.com/PX4/px4_msgs.git /tmp/px4_msgs_src/src/px4_msgs 
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash 
-RUN cd /tmp/px4_msgs_src
-RUN colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO}
-RUN rm -rf /tmp/px4_msgs_src
+RUN git clone --branch ${PX4_MSGS_VERSION} --depth 1 https://github.com/PX4/px4_msgs.git /tmp/px4_msgs_src/src/px4_msgs && \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    cd /tmp/px4_msgs_src && \
+    colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO} && \
+    rm -rf /tmp/px4_msgs_src
 
 # Micro XRCE-DDS Agent (LAUNCH_XRCE_AGENT), the uXRCE-DDS alternative to
 # MAVROS. Pinned to v2.4.3: do not change. Its superbuild bundles its own
@@ -95,25 +82,30 @@ RUN rm -rf /tmp/px4_msgs_src
 # the launch file runs it with LD_LIBRARY_PATH set to that prefix only. The
 # ldd check fails the build if anything resolves outside it.
 ARG XRCE_AGENT_VERSION=v2.4.3
-RUN apt-get install -y --no-install-recommends libasio-dev libtinyxml2-dev
-RUN rm -rf /var/lib/apt/lists/*
-RUN git clone --branch ${XRCE_AGENT_VERSION} --depth 1 https://github.com/eProsima/Micro-XRCE-DDS-Agent.git /tmp/xrce_agent
-RUN cmake -S /tmp/xrce_agent -B /tmp/xrce_agent/build \
-        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/micro_xrce_dds_agent
-RUN cmake --build /tmp/xrce_agent/build -j"$(nproc)"
-RUN cmake --install /tmp/xrce_agent/build
-RUN rm -rf /tmp/xrce_agent
-RUN ! LD_LIBRARY_PATH=/opt/micro_xrce_dds_agent/lib ldd /opt/micro_xrce_dds_agent/bin/MicroXRCEAgent | grep -E "not found|/opt/ros"
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libasio-dev libtinyxml2-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    git clone --branch ${XRCE_AGENT_VERSION} --depth 1 https://github.com/eProsima/Micro-XRCE-DDS-Agent.git /tmp/xrce_agent && \
+    cmake -S /tmp/xrce_agent -B /tmp/xrce_agent/build \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/micro_xrce_dds_agent && \
+    cmake --build /tmp/xrce_agent/build -j"$(nproc)" && \
+    cmake --install /tmp/xrce_agent/build && \
+    rm -rf /tmp/xrce_agent && \
+    ! LD_LIBRARY_PATH=/opt/micro_xrce_dds_agent/lib ldd /opt/micro_xrce_dds_agent/bin/MicroXRCEAgent | grep -E "not found|/opt/ros"
+
+RUN mkdir -p ${HOMEBREW_WS}
+RUN mkdir -p ${EXPERIMENT_WS}
+
 
 # No rosdep for homebrew_ws: its dependencies are all installed explicitly
 # above or by the base image, which builds ROS itself into
 # /opt/ros/humble/install. rosdep would apt-install duplicate copies of those.
 
 # iproute2 for the entrypoint's network wait
-RUN apt-get install -y --no-install-recommends iproute2
-RUN rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends iproute2 && \
+    rm -rf /var/lib/apt/lists/*
 
-# Entrypoint script
 COPY docker/ros_entrypoint.sh \
     /sbin/homebrew_ros_entrypoint.sh
 

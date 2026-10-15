@@ -386,10 +386,8 @@ ZED: `LAUNCH_ZED=false`, `ZED_SERIAL=12345678`), `FCU_URL=/dev/ttyFC:921600`,
 
 ### 3.7 Build the image
 
-MAVROS comes from the ROS apt repo, pinned to 2.16.0 ([7](#7-mavros-plugin-list));
-`ntrip_client`, `px4_msgs` and the Micro XRCE-DDS Agent build from source.
-The old "about 45 minutes" included building MAVROS from source; the build
-has not been timed since.
+Takes about 45 minutes (it builds MAVROS and the Micro XRCE-DDS Agent from
+source).
 
 > [!WARNING]
 > Build with **this exact command**, never `docker compose build` or
@@ -669,11 +667,11 @@ the FCU. `MAVROS_PLUGINS` in `.env` picks a list from `config/mavros/`:
   `config/mavros/minimal_pluginlists.yaml` is commented with the topics and
   services it provides.
 
-**MAVROS version:** 2.16.0, installed from the ROS apt repo at exact,
-pinned builds (the comment in `docker/Dockerfile` says why and how to change
-them). Its topics and services are under `/<namespace>/mavros/` (e.g.
-`/homebrew05/mavros/state`); 2.14.0, which this image built from source
-until 2026-10-15, used `/<namespace>/state`. Nodes elsewhere must match: see
+**MAVROS version:** 2.16.0, built from source at that tag (the comment in
+`docker/Dockerfile` says why not from apt, and what to check before changing
+it). Its topics and services are under `/<namespace>/mavros/` (e.g.
+`/homebrew05/mavros/state`); 2.14.0, used until 2026-10-15, had them under
+`/<namespace>/`. Nodes elsewhere must match: see
 `autonomy_park_sitl`'s README for checking the ground PC's MAVROS version.
 
 Measured with MAVROS 2.14.0 (not repeated with 2.16.0) on homebrew02 and
