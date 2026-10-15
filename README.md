@@ -21,7 +21,8 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 
 Sections 1–4 are one linear procedure for a freshly flashed Jetson. Run every
 block in order, top to bottom, exactly as written; nothing is skipped
-conditionally. All commands run on the Jetson over SSH unless a step says
+conditionally, except one choice in 3.5 for a vehicle without a ZED camera.
+All commands run on the Jetson over SSH unless a step says
 otherwise.
 
 ### 1.1 SSH in to the Jetson
@@ -320,7 +321,21 @@ It should point to a `ttyUSB` device.
 
 ### 3.5 ZED camera calibration
 
-With the ZED plugged into the Jetson, find its serial number (8 digits, also
+> [!IMPORTANT]
+> **No ZED on this vehicle?** Run only this block, skip the rest of 3.5 and
+> continue at 3.6. Section 2's base image is still needed: it is the image's
+> ROS 2 base, not only the ZED.
+> ```bash
+> cd ~/homebrew_docker
+> sed -i "s/^LAUNCH_ZED=.*/LAUNCH_ZED=false/" .env
+> grep '^LAUNCH_ZED=' .env
+> ```
+> `grep` should print `LAUNCH_ZED=false`. The ZED wrapper and its static
+> transform then don't start. Docker still creates an empty, root-owned
+> directory `config/zed/SN12345678.conf` for the container's ZED mount; with
+> the ZED off nothing reads it, so leave it.
+
+With a ZED: plug it into the Jetson, find its serial number (8 digits, also
 printed on the camera):
 
 ```bash
@@ -356,11 +371,12 @@ cd ~/homebrew_docker
 NUMBER=$(hostname | grep -oE '[0-9]+$')
 sed -i "s/^MAVROS_NAMESPACE=.*/MAVROS_NAMESPACE=homebrew$NUMBER/" .env
 sed -i "s/^MAVROS_TGT_SYSTEM=.*/MAVROS_TGT_SYSTEM=$((10#$NUMBER))/" .env
-grep -E '^(MAVROS_NAMESPACE|MAVROS_TGT_SYSTEM|ZED_SERIAL|FCU_URL|MAVROS_PLUGINS|USE_DISCOVERY_SERVER)=' .env
+grep -E '^(MAVROS_NAMESPACE|MAVROS_TGT_SYSTEM|LAUNCH_ZED|ZED_SERIAL|FCU_URL|MAVROS_PLUGINS|USE_DISCOVERY_SERVER)=' .env
 ```
 
 For homebrew05 this shows `MAVROS_NAMESPACE=homebrew05`,
-`MAVROS_TGT_SYSTEM=5`, your `ZED_SERIAL`, `FCU_URL=/dev/ttyFC:921600`,
+`MAVROS_TGT_SYSTEM=5`, `LAUNCH_ZED=true` and your `ZED_SERIAL` (without a
+ZED: `LAUNCH_ZED=false`, `ZED_SERIAL=12345678`), `FCU_URL=/dev/ttyFC:921600`,
 `MAVROS_PLUGINS=minimal` and `USE_DISCOVERY_SERVER=true`.
 
 > [!WARNING]
@@ -370,8 +386,10 @@ For homebrew05 this shows `MAVROS_NAMESPACE=homebrew05`,
 
 ### 3.7 Build the image
 
-Takes about 45 minutes (it builds MAVROS and the Micro XRCE-DDS Agent from
-source).
+MAVROS comes from the ROS apt repo, pinned to 2.16.0 ([7](#7-mavros-plugin-list));
+`ntrip_client`, `px4_msgs` and the Micro XRCE-DDS Agent build from source.
+The old "about 45 minutes" included building MAVROS from source; the build
+has not been timed since.
 
 > [!WARNING]
 > Build with **this exact command**, never `docker compose build` or
