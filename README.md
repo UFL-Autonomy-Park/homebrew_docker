@@ -287,7 +287,7 @@ Reboot Vehicle). `MAV_SYS_ID` only takes effect after a reboot.
 
 **Why the ID matters:** `mavros_node` is a router (talks to the FCU over
 `/dev/ttyFC`) plus a UAS node (runs the plugins that publish
-`/<namespace>/...`). The two exchange raw MAVLink over the ROS topics
+`/<namespace>/mavros/...`). The two exchange raw MAVLink over the ROS topics
 `/uas<N>/mavlink_source` and `/uas<N>/mavlink_sink`, where `N` is MAVROS's
 `tgt_system`. MAVROS hardcodes these as **absolute** names, so
 `MAVROS_NAMESPACE` does not apply to them, and two vehicles with the same ID
@@ -462,8 +462,8 @@ The rest of the check runs on the **lab PC**, not on the Jetson.
 
 ```bash
 NUMBER=05
-ros2 topic echo --once /homebrew$NUMBER/state --field connected
-ros2 topic echo --once /homebrew$NUMBER/gpsstatus/gps1/raw --field fix_type
+ros2 topic echo --once /homebrew$NUMBER/mavros/state --field connected
+ros2 topic echo --once /homebrew$NUMBER/mavros/gpsstatus/gps1/raw --field fix_type
 ros2 topic info /uas$((10#$NUMBER))/mavlink_source
 ```
 
@@ -517,7 +517,7 @@ sudo docker compose up -d --force-recreate
 The container runs an NTRIP client
 ([ntrip_client](https://github.com/LORD-MicroStrain/ntrip_client), pinned in
 the Dockerfile) that pulls RTCM corrections from the base station's caster
-over Wi-Fi and hands them to MAVROS (`/<namespace>/gps_rtk/send_rtcm`), which
+over Wi-Fi and hands them to MAVROS (`/<namespace>/mavros/gps_rtk/send_rtcm`), which
 sends them to the FCU. No ground-station MAVProxy is needed.
 
 Setup is part of 3.3 (`UAVCAN_PUB_RTCM = Enabled`: the Here4 is a DroneCAN
@@ -530,7 +530,7 @@ username and password).
 
 ```bash
 NUMBER=05
-ros2 topic echo --once /homebrew$NUMBER/gpsstatus/gps1/raw --field fix_type
+ros2 topic echo --once /homebrew$NUMBER/mavros/gpsstatus/gps1/raw --field fix_type
 ```
 
 `6` is RTK fixed, `5` RTK float, `3`/`4` no RTK.
@@ -651,13 +651,20 @@ the FCU. `MAVROS_PLUGINS` in `.env` picks a list from `config/mavros/`:
   `config/mavros/minimal_pluginlists.yaml` is commented with the topics and
   services it provides.
 
-Measured on homebrew02 and homebrew03 (20 restarts each, alternating; bench,
-FCU connected): with `full`, every start produced a 184–648 ms companion-link
+**MAVROS version:** 2.16.0, installed from the ROS apt repo at exact,
+pinned builds (the comment in `docker/Dockerfile` says why and how to change
+them). Its topics and services are under `/<namespace>/mavros/` (e.g.
+`/homebrew05/mavros/state`); 2.14.0, which this image built from source
+until 2026-10-15, used `/<namespace>/state`. Nodes elsewhere must match: see
+`autonomy_park_sitl`'s README for checking the ground PC's MAVROS version.
+
+Measured with MAVROS 2.14.0 (not repeated with 2.16.0) on homebrew02 and
+homebrew03 (20 restarts each, alternating; bench, FCU connected): with `full`, every start produced a 184–648 ms companion-link
 backlog ("TM: RTT too high" warnings) and MAVROS used ~1 CPU core; with
 `minimal`, the timesync RTT never exceeded ~10 ms, there were no warnings, and
 MAVROS used ~0.26 of a core. Before flying on `minimal`, confirm outdoors with
-an RTK fix that `global_position/local`, `global_position/global` and RTK
-corrections (`gpsstatus/gps1/raw` reaching fix type 6) all work.
+an RTK fix that `mavros/global_position/local`, `mavros/global_position/global`
+and RTK corrections (`mavros/gpsstatus/gps1/raw` reaching fix type 6) all work.
 
 After changing it, run the commands in
 [After setup: changing `homebrew_ws`](#after-setup-changing-homebrew_ws). To check which plugins loaded:
@@ -916,7 +923,13 @@ and both are handled:
 - **Topics nodes use under absolute names** (`/tf`, `/tf_static`,
   `/diagnostics`, `/move_base_simple/goal`) are remapped under the
   namespace for every node the launch file starts (`ABSOLUTE_TOPICS` in
-  `homebrew.launch.py`). Each vehicle therefore has its own TF tree on
+  `homebrew.launch.py`). With MAVROS 2.16 this works for `/tf`,
+  `/tf_static` and `/diagnostics` (published by MAVROS's main and router
+  nodes), but MAVROS's plugin nodes ignore remaps: with `MAVROS_PLUGINS=full`
+  the `guided_target` plugin's `/move_base_simple/goal` stays absolute and is
+  shared by every vehicle. `minimal` does not load that plugin (checked
+  2026-10-15 with MAVROS 2.16.0 on the lab PC: no MAVROS topic outside the
+  namespace except `/uas<N>/mavlink_*`). Each vehicle therefore has its own TF tree on
   `/<namespace>/tf`; frame names (`base_link`, `map`, ...) are the same on
   every vehicle. Tools that need TF (e.g. RViz) must remap `/tf` and
   `/tf_static` to the vehicle's topics.

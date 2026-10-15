@@ -1,5 +1,6 @@
 # Upstream MAVROS plugin selection: everything except the denylist below.
-# Copied from mavros 2.14.0 launch/px4_pluginlists.yaml so the comparison with
+# Copied from mavros launch/px4_pluginlists.yaml (identical in 2.14.0 and
+# 2.16.0) so the comparison with
 # minimal_pluginlists.yaml is explicit. Selected with MAVROS_PLUGINS=full.
 /**:
   ros__parameters:

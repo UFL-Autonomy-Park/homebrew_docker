@@ -259,9 +259,10 @@ def generate_launch_description() -> LaunchDescription:
                 "rtcm_message_package": "mavros_msgs",
             }
         ],
+        # MAVROS 2.16 puts its topics under <namespace>/mavros/
         remappings=[
-            ("rtcm", "gps_rtk/send_rtcm"),
-            ("fix", "global_position/raw/fix"),
+            ("rtcm", "mavros/gps_rtk/send_rtcm"),
+            ("fix", "mavros/global_position/raw/fix"),
         ],
         respawn=True,
         respawn_delay=10.0,

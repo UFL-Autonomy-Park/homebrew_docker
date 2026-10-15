@@ -13,32 +13,47 @@ ENV EXPERIMENT_WS=/root/experiment_ws
 
 SHELL ["/bin/bash", "-c"]
 
-# Install platform-specific ROS packages
-# In this case, MAVROS and geographiclib datasets
-#
-# TEMPORARY: ros-humble-mavros / mavros-extras / libmavconn are absent from
-# the ROS 2 apt repo for jammy (both amd64 and arm64) as of 2026-09-16 -
-# https://github.com/mavlink/mavros/issues/2293 - only mavros_msgs still
-# publishes. Building all four from source at the last known-good tag
-# (2.14.0) instead of apt-installing them. Once mavros/mavros-extras
-# reappear in the apt index at a healthy version, revert this block back to
-# the simple apt-get install ros-${ROS_DISTRO}-mavros ros-${ROS_DISTRO}-mavros-msgs
-# ros-${ROS_DISTRO}-mavros-extras that used to live here.
+# Build tools for the packages built from source below (ntrip_client, px4_msgs)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git python3-colcon-common-extensions && \
-    mkdir -p /tmp/mavros_src/src && \
-    git clone --branch 2.14.0 --depth 1 https://github.com/mavlink/mavros.git /tmp/mavros_src/src/mavros && \
-    source /opt/ros/${ROS_DISTRO}/setup.bash && \
-    rosdep install --from-paths /tmp/mavros_src/src --ignore-src -r -y
+    apt-get install -y --no-install-recommends git python3-colcon-common-extensions
 
-RUN source /opt/ros/${ROS_DISTRO}/setup.bash && \
-    cd /tmp/mavros_src && \
-    colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO}
+# MAVROS 2.16.0 from the ROS apt repo, pinned to exact builds for arm64 (the
+# Jetsons; the build stamps differ per architecture, so any other architecture
+# fails here on purpose).
+#
+# The ROS apt repo keeps only the newest build of each package. When a newer
+# one is published, these versions disappear and this step FAILS instead of
+# silently installing a different MAVROS. MAVROS renames topics between
+# versions (2.15 moved everything under <namespace>/mavros/), so before
+# changing the versions: read MAVROS's CHANGELOG.rst, check the topic names
+# the autonomy_park_sitl stack uses, then update all four together. Current
+# versions: `apt-cache policy ros-humble-mavros` in a container from this base
+# image. apt-mark hold keeps later layers from changing them.
+#
+# Until 2026-10-15 MAVROS 2.14.0 was built from source here, because of
+# https://github.com/mavlink/mavros/issues/2293 (binaries missing from apt;
+# closed 2026-09-27).
+ARG LIBMAVCONN_VERSION=2.16.0-1jammy.20260927.155237
+ARG MAVROS_VERSION=2.16.0-1jammy.20260927.163040
+ARG MAVROS_EXTRAS_VERSION=2.16.0-1jammy.20260927.170609
+ARG MAVROS_MSGS_VERSION=2.16.0-1jammy.20260927.155213
+RUN if [[ "$(dpkg --print-architecture)" != "arm64" ]]; then \
+        echo "ERROR: the MAVROS versions pinned here are arm64 builds; this is $(dpkg --print-architecture)." >&2; \
+        exit 1; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ros-${ROS_DISTRO}-libmavconn=${LIBMAVCONN_VERSION} \
+        ros-${ROS_DISTRO}-mavros=${MAVROS_VERSION} \
+        ros-${ROS_DISTRO}-mavros-extras=${MAVROS_EXTRAS_VERSION} \
+        ros-${ROS_DISTRO}-mavros-msgs=${MAVROS_MSGS_VERSION} && \
+    apt-mark hold \
+        ros-${ROS_DISTRO}-libmavconn ros-${ROS_DISTRO}-mavros \
+        ros-${ROS_DISTRO}-mavros-extras ros-${ROS_DISTRO}-mavros-msgs
 
 RUN source "/opt/ros/$ROS_DISTRO/setup.bash" && \
     source "/root/ros2_ws/install/setup.bash" && \
     ros2 run mavros install_geographiclib_datasets.sh && \
-    rm -rf /tmp/mavros_src && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ntrip_client (RTK corrections -> MAVROS gps_rtk), built from source at a
