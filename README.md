@@ -25,6 +25,9 @@ conditionally, except one choice in 3.5 for a vehicle without a ZED camera.
 All commands run on the Jetson over SSH unless a step says
 otherwise.
 
+> [!IMPORTANT] 
+> Throughout, it is assumed that the discovery server IP is `192.168.1.201`.
+
 ### 1.1 SSH in to the Jetson
 
 Connect the Jetson to the LAN via Ethernet. Find its IP in the router Client Devices (UniFi bookmark in Autonomy Park Google Chrome). Then SSH in:
