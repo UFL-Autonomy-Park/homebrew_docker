@@ -27,7 +27,7 @@ otherwise.
 
 ### 1.1 SSH in to the Jetson
 
-On your computer:
+Connect the Jetson to the LAN via Ethernet. Then SSH in:
 
 ```bash
 ssh autonomypark@192.168.XXX.XXX
@@ -57,6 +57,8 @@ Indoor Lab Wi-Fi:
 ```bash
 sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$NCR_WIFI_PW"
 ```
+
+You may then disconnect from Ethernet and proceed over Wi-Fi.
 
 ### 1.4 Set the hostname
 
