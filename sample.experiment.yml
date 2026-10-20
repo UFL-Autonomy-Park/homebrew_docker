@@ -1,33 +1,56 @@
+# Template for running experiment code on the Jetson, next to
+# homebrew_bringup's MAVROS, in the same image. The code is a ROS 2 workspace
+# in ~/experiment_ws (outside this repo, so `git pull` never touches it),
+# mounted at /root/experiment_ws and sourced by the entrypoint when
+# USE_EXPERIMENT_WS=true.
+#
+# The example is autonomy_test's hover test (autonomy_park_sitl,
+# ros2_ws/src/autonomy_test/README.md, "Running on board"); copy this file
+# and change the service name, volumes and command for your own experiment.
+# Build the workspace first (same README).
+#
+# Run it in the foreground, inside tmux (an SSH drop must not end it):
+#   cd ~/homebrew_docker
+#   sudo docker compose -f docker-compose.yml -f sample.experiment.yml run --rm hover_test
+#   echo "exit code: $?"
+# To fly: sudo FLY=true docker compose -f docker-compose.yml -f sample.experiment.yml run --rm hover_test
+#
+# `run`, not `up`: Ctrl-C reaches the node and its exit code is returned.
+# The profile keeps a plain `docker compose up` from ever starting it.
+
 services:
-  your_experiment:
-    image: ufl-autonomy-park/${PLATFORM}-${MODEL}-jetson:${IMAGE_TAG:-dev}
+  hover_test:
+    # Same image, devices, network, DDS and time-sync setup as MAVROS
+    extends:
+      file: docker-compose.yml
+      service: homebrew_bringup
+    profiles: ["experiment"]
+    restart: "no"
+    # extends copies homebrew_bringup's container_name; never reuse the name
+    # of the running MAVROS container
+    container_name: autonomypark-hover-test
 
-    runtime: nvidia
-    network_mode: host
-    ipc: host
-    privileged: true
-
+    # Relative to this directory (~/homebrew_docker), so they do not depend
+    # on whose home `sudo` uses
     volumes:
-      - /dev:/dev
-      - ./ground_ws:/root/ground_ws:ro
-      - ./experiment_ws:/root/experiment_ws
-      - ./config/fastdds:/etc/fastdds:ro
+      - ../experiment_ws:/root/experiment_ws
+      - ../autonomy_test_logs:/root/autonomy_test_logs
 
     environment:
-      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
-      ROS_LOCALHOST_ONLY: "${ROS_LOCALHOST_ONLY:-0}"
-      RMW_IMPLEMENTATION: "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
-      USE_DISCOVERY_SERVER: "${USE_DISCOVERY_SERVER:-false}"
       USE_EXPERIMENT_WS: "true"
-
-    depends_on:
-      - ground_bringup
-
-    restart: "no"
 
     command:
       - ros2
-      - launch
-      - your_experiment
-      - your_experiment.launch.py
-      - "robot_namespace:=${ROBOT_NAMESPACE}"
+      - run
+      - autonomy_test
+      - hover_test
+      - --ros-args
+      - -r
+      - "__ns:=/${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
+      - --params-file
+      - /root/experiment_ws/install/autonomy_test/share/autonomy_test/param/hover_test.yaml
+      # On the Jetson, next to MAVROS
+      - -p
+      - mavros_link:=local
+      - -p
+      - "fly:=${FLY:-false}"
