@@ -25,6 +25,8 @@ setup(
         ],
     },
     entry_points={
-        "console_scripts": [],
+        "console_scripts": [
+            "mavlink_rates = homebrew_bringup.mavlink_rates:main",
+        ],
     },
 )

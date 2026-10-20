@@ -13,6 +13,7 @@ Docker stack for MAVROS and ZED SDK, deployed on a Jetson Orin Nano running JetP
 - [6. Persistent Logs](#6-persistent-logs)
 - [7. MAVROS Plugin List](#7-mavros-plugin-list)
 - [8. Flight-Controller Bridge: MAVROS or Micro XRCE-DDS Agent](#8-flight-controller-bridge-mavros-or-micro-xrce-dds-agent)
+- [9. MAVLink Stream Rates (optional)](#9-mavlink-stream-rates-optional)
 - [Notes & Troubleshooting](#notes--troubleshooting)
 
 ---
@@ -862,6 +863,98 @@ built-in NTRIP client (corrections go over the telemetry radio while QGC is
 connected), or a second MAVLink link from the Jetson to the FCU's USB port
 carrying only corrections (e.g. MAVProxy's `ntrip` module). Neither is set up
 here.
+
+## 9. MAVLink Stream Rates (optional)
+
+MAVROS does not choose how often its topics publish: it republishes each
+MAVLink message as it arrives, so the rate is whatever PX4 streams on TELEM2.
+PX4's defaults for that link (measured on homebrew08, 2026-10-20):
+
+| MAVROS topic(s) | MAVLink message (id) | Default |
+|---|---|---|
+| `local_position/pose`, `/velocity_local`, `/odom` | `LOCAL_POSITION_NED` (32) | 30 Hz |
+| `global_position/global`, `/local`, `/rel_alt`, `/compass_hdg` | `GLOBAL_POSITION_INT` (33) | 50 Hz |
+| `altitude` | `ALTITUDE` (141) | 10 Hz |
+| `imu/data`; the orientation in MAVROS's pose/odometry topics | `ATTITUDE_QUATERNION` (31) | 50 Hz |
+
+`MAVLINK_RATES` in `.env` asks PX4 for other rates. It is **empty by default**,
+and then nothing changes. When set (and `LAUNCH_MAVROS=true`), the launch
+starts the `mavlink_rates` node
+(`homebrew_ws/src/homebrew_bringup/homebrew_bringup/mavlink_rates.py`), which
+calls MAVROS's `mavros/set_message_interval` service for each entry.
+
+PX4 keeps these rates in RAM only, so a PX4 reboot quietly restores its
+defaults. That is why the node reapplies them **every time `mavros/state`
+reports the FCU connected**, not just once at startup, and retries every 2 s
+any rate the FCU does not accept.
+
+### 9.1 Enable
+
+1. In `.env`, as `<message id>:<Hz>` pairs separated by commas. For example,
+   100 Hz for `altitude`, `global_position/*` and `local_position/*`:
+
+   ```bash
+   MAVLINK_RATES=141:100,33:100,32:100
+   ```
+
+2. Run the commands in
+   [After setup: changing `homebrew_ws`](#after-setup-changing-homebrew_ws)
+   (the node is new code, so the package must be rebuilt; after that,
+   changing only `.env` needs just `sudo docker compose up -d --force-recreate`).
+
+3. Check the node's log. It should print one `accepted by FCU` line per
+   message:
+
+   ```bash
+   sudo docker compose logs homebrew_bringup | grep mavlink_rates
+   ```
+
+   A malformed value stops the launch with
+   `MAVLINK_RATES must look like 141:100,33:100`.
+
+4. Measure the result from the lab PC, one topic at a time:
+
+   ```bash
+   ros2 topic hz /<namespace>/mavros/local_position/velocity_local
+   ```
+
+To turn it off, empty `MAVLINK_RATES` and recreate the container; PX4 returns
+to its defaults only when it reboots.
+
+To try a rate once without the node (lost when PX4 reboots):
+
+```bash
+ros2 service call /<namespace>/mavros/set_message_interval \
+  mavros_msgs/srv/MessageInterval "{message_id: 32, message_rate: 100.0}"
+```
+
+### 9.2 Caveats
+
+- **Serial bandwidth.** TELEM2 runs at 921600 baud, about 92 KB/s. With
+  `MAV_1_RATE = 0` (TELEM2's instance, 3.3), PX4 allows itself only part of that, and if the streams
+  ask for more than its limit it **slows every stream on the link
+  proportionally**, including the ones you did not change. Check in
+  QGroundControl → Analyze Tools → MAVLink Console with `mavlink status`: the
+  TELEM2 instance shows its tx rate and rate multiplier, which should stay
+  1.0. The example above adds about 12 KB/s.
+- **Topics you didn't name speed up too.** Each message feeds several
+  topics (table above).
+- **Orientation stays at the attitude rate.** MAVROS fills pose/odometry
+  orientation from the latest `ATTITUDE_QUATERNION`, so at 100 Hz half the
+  samples repeat orientation unless you also add `31:100`.
+- **Millisecond timestamps.** `LOCAL_POSITION_NED` and `GLOBAL_POSITION_INT`
+  carry `time_boot_ms`. At 100 Hz, the time between header stamps can be off
+  by up to about 10 %. Controllers that differentiate or integrate should
+  smooth dt or use a nominal value.
+- **Some messages can't go faster.** PX4 sends a message only when its source
+  updates; `ALTITUDE` in particular may come out below the requested rate.
+  Measure it.
+- **The estimator runs at a fixed rate.** EKF2 updates at roughly
+  100–250 Hz, so asking for more than about 100–150 Hz gains little. For
+  faster or lower-latency odometry, see the XRCE agent
+  ([8](#8-flight-controller-bridge-mavros-or-micro-xrce-dds-agent)).
+- **Watch link health after enabling.** Check that `mavros/timesync_status`
+  `round_trip_time_ms` stays at a few ms as it does at the defaults.
 
 ## Notes & Troubleshooting
 

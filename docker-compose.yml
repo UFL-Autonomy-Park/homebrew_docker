@@ -73,7 +73,9 @@ services:
       - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
       - "mavros_tgt_system:=${MAVROS_TGT_SYSTEM:?set MAVROS_TGT_SYSTEM in .env}"
-      - "mavros_plugins:=${MAVROS_PLUGINS:-full}"
+      - "mavros_plugins:=${MAVROS_PLUGINS:-minimal}"
+      # Empty (the default) leaves PX4's stream rates alone
+      - "mavlink_rates:=${MAVLINK_RATES:-}"
       - "launch_ntrip:=${LAUNCH_NTRIP:-true}"
       - "ntrip_host:=${NTRIP_HOST:?set NTRIP_HOST in .env}"
       - "ntrip_port:=${NTRIP_PORT:-2101}"

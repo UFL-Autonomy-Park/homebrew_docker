@@ -121,6 +121,41 @@ def make_xrce_agent(context):
     ]
 
 
+def make_mavlink_rates_node(context):
+    """mavlink_rates node, only with MAVROS and a non-empty MAVLINK_RATES.
+
+    mavlink_rates is "<message id>:<Hz>,..." e.g. "141:100,33:100,32:100".
+    """
+    spec = LaunchConfiguration("mavlink_rates").perform(context).strip()
+    if not spec or not _is_true(context, "launch_mavros"):
+        return []
+    ids, rates = [], []
+    for item in spec.split(","):
+        msg_id, sep, rate = item.strip().partition(":")
+        try:
+            if not sep:
+                raise ValueError
+            ids.append(int(msg_id))
+            rates.append(float(rate))
+        except ValueError:
+            raise RuntimeError(
+                "MAVLINK_RATES must look like 141:100,33:100 "
+                f"(<message id>:<Hz>), got {spec!r}"
+            )
+    return [
+        Node(
+            package="homebrew_bringup",
+            executable="mavlink_rates",
+            name="mavlink_rates",
+            namespace=LaunchConfiguration("mavros_namespace"),
+            parameters=[{"message_ids": ids, "rates_hz": rates}],
+            output="screen",
+            respawn=True,
+            respawn_delay=5.0,
+        )
+    ]
+
+
 def make_static_transform_node(
     *,
     node_name: str,
@@ -332,6 +367,12 @@ def generate_launch_description() -> LaunchDescription:
                 description="MAVROS plugin list in config/mavros/: "
                 "full (upstream PX4 default) or minimal",
             ),
+            DeclareLaunchArgument(
+                "mavlink_rates",
+                default_value="",
+                description="MAVLink stream rates to request from the FCU, "
+                "'<message id>:<Hz>,...'; empty leaves PX4's defaults",
+            ),
             DeclareLaunchArgument("ntrip_host", description="NTRIP caster address"),
             DeclareLaunchArgument(
                 "ntrip_port", default_value="2101", description="NTRIP caster port"
@@ -348,6 +389,7 @@ def generate_launch_description() -> LaunchDescription:
                     OpaqueFunction(function=check_one_bridge),
                     zed_launch,
                     mavros_launch,
+                    OpaqueFunction(function=make_mavlink_rates_node),
                     OpaqueFunction(function=make_xrce_agent),
                     ntrip_client_node,
                     make_static_transform_node(
