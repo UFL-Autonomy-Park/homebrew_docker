@@ -885,8 +885,12 @@ calls MAVROS's `mavros/set_message_interval` service for each entry.
 
 PX4 keeps these rates in RAM only, so a PX4 reboot quietly restores its
 defaults. That is why the node reapplies them **every time `mavros/state`
-reports the FCU connected**, not just once at startup, and retries every 2 s
-any rate the FCU does not accept.
+reports the FCU connected, and every time the FCU's clock
+(`mavros/timesync_status` `remote_timestamp_ns`) jumps backwards**, not just
+once at startup. The second trigger is needed because a quick PX4 reboot (e.g.
+after a parameter change) is back within MAVROS's 10 s `conn_timeout`, so
+`mavros/state` never reports a disconnect. It also retries every 2 s any rate
+the FCU does not accept.
 
 ### 9.1 Enable
 
