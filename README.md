@@ -47,18 +47,8 @@ sudo apt-get install -y nano git curl
 
 ### 1.3 Connect to Wi-Fi
 
-Run the one line for the network the Jetson will use.
-
-APark Wi-Fi:
-
 ```bash
 sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$APARK_WIFI_PW"
-```
-
-Indoor Lab Wi-Fi:
-
-```bash
-sudo nmcli device wifi connect "UFLAutonomyPark_5GHz" password "$NCR_WIFI_PW"
 ```
 
 You may then disconnect from Ethernet and proceed over Wi-Fi.
@@ -492,7 +482,7 @@ NUMBER=05
 
 Then:
 
-```
+```bash
 ros2 topic echo --once /homebrew$NUMBER/mavros/state --field connected
 ros2 topic echo --once /homebrew$NUMBER/mavros/gpsstatus/gps1/raw --field fix_type
 ros2 topic info /uas$((10#$NUMBER))/mavlink_source
@@ -565,7 +555,7 @@ NUMBER=05
 
 Then:
 
-```
+```bash
 ros2 topic echo --once /homebrew$NUMBER/mavros/gpsstatus/gps1/raw --field fix_type
 ```
 
@@ -606,7 +596,7 @@ Without this setup, every log that matters is lost sooner or later: the
 Jetson's system journal lives in RAM (gone at every reboot or power loss), and
 ROS logs written inside the container are gone whenever it is recreated, which
 `homebrew-docker.service` does on every clean shutdown via `docker compose
-down`. Three pieces fix this:
+down`. Four pieces fix this:
 
 | Log | Where it goes | Set up by |
 |---|---|---|
@@ -694,9 +684,12 @@ MAVROS loads one plugin per MAVLink feature; the upstream PX4 default loads
 about 60, each with its own ROS node, topics, services and startup requests to
 the FCU. `MAVROS_PLUGINS` in `.env` picks a list from `config/mavros/`:
 
-- `full` (default): the upstream PX4 list, all plugins but five.
-- `minimal`: the 14 plugins that `autonomy_park_sitl`'s `ros2_ws` uses, RTK
-  needs, and those depend on. Each entry in
+- `full`: the upstream PX4 list, all plugins but five. Used if
+  `MAVROS_PLUGINS` is unset.
+- `minimal` (set in `.env.example`): 14 plugins, those that
+  `autonomy_park_sitl`'s `ros2_ws` uses, RTK
+  needs, and those depend on, plus `distance_sensor` and `px4flow` for
+  watching the rangefinder and optical flow. Each entry in
   `config/mavros/minimal_pluginlists.yaml` is commented with the topics and
   services it provides.
 
@@ -745,7 +738,7 @@ The Jetson can talk to the flight controller in one of two ways:
 | | MAVROS (default) | Micro XRCE-DDS Agent |
 |---|---|---|
 | Protocol on TELEM2 | MAVLink | uXRCE-DDS (PX4's native DDS bridge) |
-| ROS interface | `mavros_msgs`, `/<namespace>/...` topics and services | `px4_msgs`, `/<namespace>/fmu/out/...` and `/fmu/in/...` topics |
+| ROS interface | `mavros_msgs`, `/<namespace>/mavros/...` topics and services | `px4_msgs`, `/<namespace>/fmu/out/...` and `/fmu/in/...` topics |
 | Topics | chosen by `MAVROS_PLUGINS` ([7](#7-mavros-plugin-list)) | fixed by the PX4 firmware's built-in list (v1.16.2: 24 out, 27 in) |
 | RTK corrections | NTRIP client → MAVROS → FCU | **none** (see below) |
 | Used by `autonomy_park_sitl` | yes | no |
@@ -829,8 +822,8 @@ vehicle; PX4 v1.16.2 stock topic list):
    ```bash
    NUMBER=05
    ```
-   
-   Then: 
+
+   Then:
 
    ```bash
    ros2 topic list | grep "^/homebrew$NUMBER/fmu/" | wc -l
@@ -927,7 +920,7 @@ sudo systemctl status docker.service
 ```
 
 > [!NOTE]
-> When running the image for the first time, the ZED AI models need to download. Make sure the Jetson is connected to the Internet for that first run. Once the models have downloaded successfully, the container can run with Internet.
+> When running the image for the first time, the ZED AI models need to download. Make sure the Jetson is connected to the Internet for that first run. Once the models have downloaded successfully, the container can run without Internet.
 
 > [!IMPORTANT]
 > Always double-check the discovery server IP in both
