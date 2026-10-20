@@ -27,7 +27,7 @@ otherwise.
 
 ### 1.1 SSH in to the Jetson
 
-Connect the Jetson to the LAN via Ethernet. Then SSH in:
+Connect the Jetson to the LAN via Ethernet. Find its IP in the router Client Devices (UniFi bookmark in Autonomy Park Google Chrome). Then SSH in:
 
 ```bash
 ssh autonomypark@192.168.XXX.XXX
@@ -69,6 +69,11 @@ You may then disconnect from Ethernet and proceed over Wi-Fi.
 
 ```bash
 NUMBER=05
+```
+
+Then:
+
+```bash
 sudo hostnamectl set-hostname "homebrew-jetson-$NUMBER"
 sudo sed -i '/^127\.0\.1\.1\s/d' /etc/hosts
 echo -e "127.0.1.1\thomebrew-jetson-$NUMBER" | sudo tee -a /etc/hosts
@@ -480,6 +485,11 @@ The rest of the check runs on the **lab PC**, not on the Jetson.
 
 ```bash
 NUMBER=05
+```
+
+Then:
+
+```
 ros2 topic echo --once /homebrew$NUMBER/mavros/state --field connected
 ros2 topic echo --once /homebrew$NUMBER/mavros/gpsstatus/gps1/raw --field fix_type
 ros2 topic info /uas$((10#$NUMBER))/mavlink_source
@@ -548,6 +558,11 @@ username and password).
 
 ```bash
 NUMBER=05
+```
+
+Then:
+
+```
 ros2 topic echo --once /homebrew$NUMBER/mavros/gpsstatus/gps1/raw --field fix_type
 ```
 
@@ -631,15 +646,28 @@ written under the old ID stay readable with
 
 Reading them:
 
+Container output for this boot, and the previous boot
 ```bash
-# Container output for this boot, and the previous boot
 journalctl CONTAINER_NAME=autonomypark-homebrew -b
+```
+
+Container output for previous boot
+```bash
 journalctl CONTAINER_NAME=autonomypark-homebrew -b -1
-# Kernel messages from the previous boot (e.g. after a power loss)
+```
+
+Kernel messages from the previous boot (e.g. after a power loss):
+```bash
 journalctl -k -b -1
-# Did a ROS node die? (launch.log is per launch, under logs/ros/<timestamp>/)
+```
+
+Did a ROS node die? (launch.log is per launch, under logs/ros/<timestamp>/)
+```bash
 grep -a "has died" logs/ros/*/launch.log
-# Core dumps
+```
+
+Core dumps
+```bash
 coredumpctl list
 ```
 
@@ -797,6 +825,11 @@ vehicle; PX4 v1.16.2 stock topic list):
 
    ```bash
    NUMBER=05
+   ```
+   
+   Then: 
+
+   ```bash
    ros2 topic list | grep "^/homebrew$NUMBER/fmu/" | wc -l
    ros2 topic list | grep "^/homebrew$NUMBER/fmu/" | head
    ```
