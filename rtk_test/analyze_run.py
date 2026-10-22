@@ -293,24 +293,40 @@ def ulog_rtcm_instances(ulog):
 class ClockMap:
     """PX4 time (s since boot) <-> companion wall clock (epoch s), from timesync_status.
 
-    PX4's timesync publishes estimated_offset = PX4 time - companion time, so
-    companion = px4 - offset (checked against the data in check_sign()).
+    Offsets are PX4 time - companion time, so companion = px4 - offset (the
+    sign is checked against the data in analyze()). Uses each timesync
+    packet's observed_offset through a rolling median, not estimated_offset:
+    PX4's smoothing lags a steady clock drift (in SITL the simulated clock
+    runs a few percent off wall time, giving ~150 ms errors), and the median
+    rejects packets delayed in transit (100+ ms outliers).
     """
 
+    MEDIAN_WINDOW = 21
+
     def __init__(self, ulog, source_protocol):
-        self.t, self.off = [], []
+        t, off = [], []
         for d in ulog_datasets(ulog, 'timesync_status'):
             sp = d.data.get('source_protocol')
             if sp is None:
                 continue
             sel = sp == source_protocol
-            self.t += list(d.data['timestamp'][sel] / 1e6)
-            self.off += list(d.data['estimated_offset'][sel] / 1e6)
-        order = np.argsort(self.t)
-        self.t = np.array(self.t)[order]
-        self.off = np.array(self.off)[order]
+            key = 'observed_offset' if 'observed_offset' in d.data else 'estimated_offset'
+            t += list(d.data['timestamp'][sel] / 1e6)
+            off += list(d.data[key][sel] / 1e6)
+        order = np.argsort(t)
+        self.t = np.array(t)[order]
+        raw = np.array(off)[order]
+        self.valid = len(self.t) > 0 and np.any(raw != 0)
         self.sign = 1.0
-        self.valid = len(self.t) > 0 and np.any(self.off != 0)
+        if len(raw) >= self.MEDIAN_WINDOW:
+            # Median relative to the first value: keeps float64 precision on epoch-sized offsets
+            base = raw[0]
+            w = self.MEDIAN_WINDOW
+            padded = np.pad(raw - base, w // 2, mode='edge')
+            windows = np.lib.stride_tricks.sliding_window_view(padded, w)
+            self.off = np.median(windows, axis=1) + base
+        else:
+            self.off = raw
 
     def offset_at(self, px4_t):
         return np.interp(px4_t, self.t, self.off)
@@ -337,7 +353,8 @@ def compare(a_items, b_items, window=None):
     sm = difflib.SequenceMatcher(None, a_keys, b_keys, autojunk=False)
     lo, hi = window if window else (-np.inf, np.inf)
     res = {'a_count': len(a_items), 'b_count': len(b_items), 'matched': 0, 'missing': 0, 'extra': 0,
-           'edge_missing': 0, 'edge_extra': 0, 'missing_examples': [], 'extra_examples': [], 'pairs': []}
+           'edge_missing': 0, 'edge_extra': 0, 'missing_examples': [], 'extra_examples': [], 'pairs': [],
+           'missing_times': []}
 
     def edge(t):
         return t < lo + EDGE_S or t > hi - EDGE_S
@@ -352,6 +369,7 @@ def compare(a_items, b_items, window=None):
                 res['edge_missing'] += 1
             else:
                 res['missing'] += 1
+                res['missing_times'].append(a_items[i][0])
                 if len(res['missing_examples']) < 20:
                     res['missing_examples'].append({'t': a_items[i][0], **a_items[i][2]})
         for j in range(j1, j2):
@@ -603,11 +621,10 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
                 g = d.data['message_gaps'].astype(np.int64)
                 gaps.append(int(g.max() - g.min()))
         s['px4']['logger_message_gaps'] = sum(gaps) if gaps else None
-        if gaps and sum(gaps):
-            warn(f'PX4 logger missed {sum(gaps)} full-rate messages: a missing chunk at hop 3 may be a '
-                 'logging gap rather than a real loss.')
 
         msgs = [(m.timestamp / 1e6, m.log_level_str(), m.message) for m in ulog.logged_messages]
+        if mode == 'xrce':
+            dds_sessions(s, msgs, hop3_raw, clock, load_events(run))
         lost = [m for m in msgs if 'rtcm_corrections lost' in m[2]]
         s['px4']['rtcm_lost_warnings'] = len(lost)
         s['px4']['messages'] = [f'{t:.1f}s {lvl} {txt}' for t, lvl, txt in msgs
@@ -617,8 +634,61 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
         s['fix'] = fix['summary']
         s['_fix'] = fix
 
+    extra = s['comparisons'].get('2_to_3_chunks', {}).get('extra', 0)
+    if extra:
+        warn(f'PX4 received {extra} chunks the bag does not have on the link topic: the recorder missed them '
+             '(it subscribes best effort). Hop 2 counts are incomplete; PX4 side counts are authoritative.')
+    gaps = (s.get('px4') or {}).get('logger_message_gaps')
+    unmatched = sum(s['comparisons'][k].get('missing_unexplained', s['comparisons'][k]['missing'])
+                    for k in ('2_to_3_chunks', '1_to_3_frames') if k in s['comparisons'])
+    if gaps and unmatched:
+        warn(f'PX4 logger missed {gaps} full-rate messages (all topics together) and {unmatched} correction '
+             'items are missing at hop 3: those may be logging gaps rather than real losses.')
     s['verdicts'] = verdicts(s, criteria)
     return s
+
+
+def dds_sessions(s, msgs, hop3_raw, clock, events):
+    """DDS session drops and the correction losses they explain (XRCE runs).
+
+    PX4's client logs "No ping response" / "session disconnected" when it loses
+    the agent and "synchronized with time offset" when the session is back.
+    Chunks published while the session is down are dropped (nothing buffers
+    them); losses inside a correction outage at PX4 that contains a
+    disconnect are attributed to it, everything else stays unexplained.
+    """
+    downs, ups = [], []
+    for t, _, text in msgs:
+        if 'No ping response' in text or 'session disconnected' in text:
+            if not downs or t - downs[-1] > 1.0:
+                downs.append(t)
+        elif 'synchronized with time offset' in text:
+            ups.append(t)
+    corr = np.array([t for t, _, _ in hop3_raw])
+    outages = []
+    if len(corr) > 1:
+        gi = np.nonzero(np.diff(corr) > CORRECTION_GAP_S)[0]
+        outages = [(corr[i], corr[i + 1]) for i in gi]
+    session_outages = [(a, b) for a, b in outages if any(a - 1.0 <= d <= b for d in downs)]
+    reconnects = []
+    for d in downs:
+        u = next((x for x in ups if x > d), None)
+        o = next(((a, b) for a, b in session_outages if a - 1.0 <= d <= b), None)
+        first = corr[corr > u] if u is not None else []
+        reconnects.append({'disconnect_s': d, 'reconnect_after_s': None if u is None else u - d,
+                           'correction_outage_s': None if o is None else o[1] - o[0],
+                           'first_chunk_after_reconnect_s': float(first[0] - u) if len(first) else None})
+    restarts = [(te, text) for te, text in events if 'restart' in text.lower()]
+    s['dds_session'] = {'disconnects': len(downs), 'reconnects': reconnects, 'injected_restarts': len(restarts),
+                        'outages_with_disconnect_s': [{'from_s': a, 'duration_s': b - a} for a, b in session_outages]}
+    if clock.valid:
+        windows = [(float(clock.to_wall(a)), float(clock.to_wall(b))) for a, b in session_outages]
+        for key in ('2_to_3_chunks', '1_to_3_frames'):
+            c = s['comparisons'].get(key)
+            if c:
+                explained = sum(1 for t in c['missing_times'] if any(a - 0.5 <= t <= b + 0.5 for a, b in windows))
+                c['missing_while_session_down'] = explained
+                c['missing_unexplained'] = c['missing'] - explained
 
 
 def fix_analysis(ulog, hop3_raw, clock, events, window):
@@ -650,7 +720,11 @@ def fix_analysis(ulog, hop3_raw, clock, events, window):
     res['summary']['armed_periods_s'] = armed
 
     def in_gap(t):
-        return any(a <= t <= b for a, b in gaps) or (len(corr_t) and t < corr_t[0])
+        # Before the first chunk, between chunks more than CORRECTION_GAP_S apart,
+        # and after the last chunk, corrections are not flowing
+        if not len(corr_t) or t < corr_t[0] or t > corr_t[-1] + CORRECTION_GAP_S:
+            return True
+        return any(a <= t <= b for a, b in gaps)
 
     for d in ulog_datasets(ulog, 'sensor_gnss'):
         t = d.data['timestamp'] / 1e6
@@ -660,7 +734,7 @@ def fix_analysis(ulog, hop3_raw, clock, events, window):
         if clock.valid:
             wall = clock.to_wall(t)
             lo, hi = window
-            sel = (wall >= lo - 5) & (wall <= hi + 5)
+            sel = (wall >= lo) & (wall <= hi)
             t, ft = t[sel], ft[sel]
             sub = {k: d.data[k][sel] for k in ('eph', 'epv', 'satellites_used') if k in d.data}
         else:
@@ -674,7 +748,7 @@ def fix_analysis(ulog, hop3_raw, clock, events, window):
         # Time to RTK fixed after each correction start (first, and after each outage)
         ttff = []
         for c0 in starts:
-            before = ft[t <= c0]
+            before = ft[t < c0 - 0.2]
             if len(before) and before[-1] >= FIX_RTK_FIXED:
                 ttff.append({'corrections_from_s': float(c0), 'ttff_s': None, 'note': 'already RTK fixed'})
                 continue
@@ -738,28 +812,57 @@ def verdicts(s, c):
                     'value': value, 'limit': limit, 'note': why})
 
     comp = s['comparisons']
+    # A frame "lost" between ntrip_client and the link that PX4 nevertheless
+    # received was missed by the recorder (best-effort subscription), not the
+    # link: the hop 2 record is incomplete, the system did not lose it.
+    recorder_gap = ('1_to_2_frames' in comp and '1_to_3_frames' in comp and comp['1_to_2_frames']['missing']
+                    and comp['1_to_3_frames']['missing'] == 0)
     for key, label in (('0_to_1_frames', 'caster -> ntrip_client frames lost'),
                        ('1_to_2_frames', 'ntrip_client -> FCU link frames lost'),
                        ('2_to_3_chunks', 'DDS -> PX4 chunks lost'),
                        ('1_to_3_frames', 'end to end (ntrip_client -> PX4) frames lost')):
         if key in comp:
-            v = comp[key]['missing']
+            v = comp[key].get('missing_unexplained', comp[key]['missing'])
             gaps = (s.get('px4') or {}).get('logger_message_gaps')
             incomplete = key.endswith('3_chunks') or key.endswith('3_frames')
+            if key == '1_to_2_frames' and recorder_gap:
+                add(label, True, v, c['max_lost'], incomplete=True,
+                    why='PX4 received all of them: the recorder missed them on the link topic')
+                continue
             add(label, v <= c['max_lost'], v, c['max_lost'],
                 incomplete=bool(incomplete and v and gaps),
                 why='PX4 logger missed messages in this run' if incomplete and v and gaps else '')
         elif key == '0_to_1_frames':
             add(label, False, None, c['max_lost'], incomplete=True, why='no caster tap')
+    sess = s.get('dds_session')
+    if sess:
+        add('DDS session disconnects beyond the injected agent restarts',
+            sess['disconnects'] <= sess['injected_restarts'], sess['disconnects'], sess['injected_restarts'])
+        for k in ('2_to_3_chunks', '1_to_3_frames'):
+            if comp.get(k, {}).get('missing_while_session_down'):
+                out.append({'check': f'{k}: lost while the DDS session was down', 'result': 'INFO',
+                            'value': comp[k]['missing_while_session_down'], 'limit': None,
+                            'note': 'not buffered across a reconnect'})
+    gaps3 = (s.get('px4') or {}).get('logger_message_gaps')
+    missing3 = sum(comp[k].get('missing_unexplained', comp[k]['missing']) for k in ('2_to_3_chunks',) if k in comp)
     for hop, h in s['hops'].items():
         if h['crc_failures'] or (h['garbage_bytes'] and hop != '0_caster'):
-            add(f'hop {hop}: corrupted data', False, h['crc_failures'] + h['garbage_bytes'], 0)
+            # Hop 3 is the logger's view: chunks it missed break frames there too
+            unproven = hop == '3_px4_uorb' and bool(gaps3 and missing3)
+            add(f'hop {hop}: corrupted data', False, h['crc_failures'] + h['garbage_bytes'], 0, incomplete=unproven,
+                why='frames broken by chunks missing from the log' if unproven else '')
     if 'px4' in s:
         add('PX4 "rtcm_corrections lost" warnings', s['px4']['rtcm_lost_warnings'] <= c['max_lost'],
             s['px4']['rtcm_lost_warnings'], c['max_lost'])
-        if s['px4'].get('logger_message_gaps') is not None:
-            add('PX4 logger gaps (evidence completeness)', s['px4']['logger_message_gaps'] == 0,
-                s['px4']['logger_message_gaps'], 0)
+        gaps = s['px4'].get('logger_message_gaps')
+        if gaps is not None:
+            # PX4 counts gaps over all full-rate topics together. They matter only
+            # if some correction chunk is unaccounted for at hop 3.
+            unmatched = sum(comp[k].get('missing_unexplained', comp[k]['missing'])
+                            for k in ('2_to_3_chunks', '1_to_3_frames') if k in comp)
+            add('PX4 logger gaps (evidence completeness)', True, gaps, 0, incomplete=bool(gaps and unmatched),
+                why=('' if not gaps else 'in other full-rate topics; every correction chunk is accounted for'
+                     if not unmatched else 'some chunks at hop 3 are unaccounted for'))
     if 'latency_ms' in s:
         add('DDS hop latency p99 (ms)', s['latency_ms']['p99'] <= c['latency_p99_ms_max'],
             round(s['latency_ms']['p99'], 1), c['latency_p99_ms_max'])
@@ -849,6 +952,10 @@ def charts(s, out_dir):
     return files
 
 
+def fmt_s(v):
+    return 'never' if v is None else f'{v:.2f} s'
+
+
 def markdown(s, chart_files):
     L = []
     w = L.append
@@ -888,6 +995,17 @@ def markdown(s, chart_files):
         if c['missing_examples']:
             w(f'\nLost in {k} (first {len(c["missing_examples"])}): ' +
               '; '.join(f'{iso(x["t"])} {x}' for x in c['missing_examples'][:10]))
+    sess = s.get('dds_session')
+    if sess and (sess['disconnects'] or sess['injected_restarts']):
+        w(f'\n### DDS session\n\n{sess["disconnects"]} disconnects ({sess["injected_restarts"]} agent restarts injected)')
+        for r in sess['reconnects']:
+            w(f'- disconnected at {r["disconnect_s"]:.1f} s (PX4 time): session back after '
+              f'{fmt_s(r["reconnect_after_s"])}, first chunk {fmt_s(r["first_chunk_after_reconnect_s"])} later; '
+              f'corrections out at PX4 for {fmt_s(r["correction_outage_s"])}')
+        for k, c in s['comparisons'].items():
+            if 'missing_while_session_down' in c:
+                w(f'- {k}: {c["missing_while_session_down"]} lost while the session was down, '
+                  f'{c["missing_unexplained"]} unexplained')
     if 'latency_ms' in s:
         lm = s['latency_ms']
         w(f'\n### Latency, companion -> PX4\n\n{lm["n"]} chunks: p50 {lm["p50"]:.1f} ms, p95 {lm["p95"]:.1f} ms, '
@@ -902,7 +1020,7 @@ def markdown(s, chart_files):
             for x in r['time_to_rtk_fixed']:
                 w(f'- corrections from {x["corrections_from_s"]:.1f} s: '
                   + (x['note'] if x.get('note') else
-                     f'RTK float after {x["time_to_float_s"]}, RTK fixed after {x["ttff_s"]} s'))
+                     f'RTK float after {fmt_s(x["time_to_float_s"])}, RTK fixed after {fmt_s(x["ttff_s"])}'))
             if 'fixed_fraction_after_first_fix' in r:
                 w(f'- RTK fixed share after first fix: {r["fixed_fraction_after_first_fix"]:.4f}; '
                   f'with corrections flowing: {r.get("fixed_fraction_with_corrections_flowing")}')

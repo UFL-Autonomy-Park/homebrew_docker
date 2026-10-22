@@ -35,7 +35,8 @@ def row(summary):
     # The receiver that reached RTK fixed (the rover); else the first one
     rid = next((k for k, r in receivers.items() if r.get('fixed_fraction_after_first_fix')), next(iter(receivers), None))
     r = receivers.get(rid, {})
-    lost = sum(c['missing'] for c in summary['comparisons'].values())
+    # Losses explained by an injected DDS session drop are reported per run, not counted here
+    lost = sum(c.get('missing_unexplained', c['missing']) for c in summary['comparisons'].values())
     return {
         'run': summary['run'], 'mode': summary['mode'], 'label': summary.get('label'),
         'start': summary.get('start_utc'), 'receiver': rid,
@@ -114,7 +115,7 @@ def main():
     for name, ok, v, lim in checks:
         L.append(f'| {name} | **{"PASS" if ok else "FAIL"}** | {v} | {lim} |')
     L.append('\n### By mode\n\n| Mode | Runs | Median time to RTK fixed (s) | Median fixed share | '
-             'Unexpected drops | Items lost | Runs with a FAIL | Runs incomplete |\n|---|---|---|---|---|---|---|---|')
+             'Unexpected drops | Items lost or unaccounted | Runs with a FAIL | Runs incomplete |\n|---|---|---|---|---|---|---|---|')
     for m in ('xrce', 'mavros'):
         g = agg[m]
         L.append(f'| {m.upper()} | {g["runs"]} | {fmt(g["ttff_median_s"])} | {fmt(g["fixed_share_median"], 4)} | '

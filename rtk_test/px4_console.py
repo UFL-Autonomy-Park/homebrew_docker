@@ -103,8 +103,10 @@ class Shell:
         out, complete = self.read_until_prompt(timeout)
         text = ANSI.sub(b'', out).decode('utf-8', 'replace').replace('\r', '')
         lines = text.split('\n')
-        # Drop the echoed command and the trailing prompt
-        if lines and lines[0].strip() == command.strip():
+        # Drop the echoed command (after any leading prompt or blank lines) and the trailing prompt
+        while lines and not lines[0].strip():
+            lines = lines[1:]
+        if lines and lines[0].strip().endswith(command.strip()):
             lines = lines[1:]
         if lines and lines[-1].strip() in ('nsh>', 'pxh>'):
             lines = lines[:-1]

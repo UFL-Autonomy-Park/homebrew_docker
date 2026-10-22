@@ -73,9 +73,11 @@ utc_now() { date -u +%Y-%m-%dT%H:%M:%S.%NZ; }
 topics_for() {
     local m="$1" ns="$2" tgt="$3"
     if [[ "$m" == "xrce" ]]; then
+        # Versioned PX4 messages get a _v<N> suffix on DDS (vehicle_status_v4
+        # on the PR branch); the number changes between PX4 versions
         echo "/${ns}/rtcm_bridge/rtcm /${ns}/rtcm_bridge/fix /${ns}/fmu/in/rtcm_corrections" \
              "/${ns}/fmu/out/vehicle_gnss /${ns}/fmu/out/timesync_status" \
-             "/${ns}/fmu/out/vehicle_status /rosout"
+             "/${ns}/fmu/out/vehicle_status(_v[0-9]+)? /rosout"
     else
         # /uas<N>/mavlink_sink: what MAVROS sends the FCU, incl. GPS_RTCM_DATA
         echo "/${ns}/mavros/gps_rtk/send_rtcm /${ns}/mavros/global_position/raw/fix" \
@@ -150,11 +152,14 @@ start_run() {
     run="${out_dir}/${run_name}"
     mkdir -p "${run}"
     write_meta "${run}" "${mode}" "${ns}" "${tgt}" "${container}"
+    # Topic names as regular expressions, recorded with one anchored --regex
     # shellcheck disable=SC2207
     local topics=($(topics_for "${mode}" "${ns}" "${tgt}"))
+    local regex
+    regex="^($(IFS='|'; echo "${topics[*]}"))\$"
 
     if [[ "${local_mode}" == true ]]; then
-        setsid ros2 bag record -s sqlite3 --polling-interval 100 -o "${run}/bag" "${topics[@]}" \
+        setsid ros2 bag record -s sqlite3 --polling-interval 100 -o "${run}/bag" -e "${regex}" \
             > "${run}/meta/recorder.log" 2>&1 < /dev/null &
         echo $! > "${run}/meta/recorder.pid"
     else
@@ -164,7 +169,7 @@ start_run() {
             -e FASTRTPS_PROFILE_PATH=/etc/fastdds/super_client_config.xml \
             -v "${out_dir}:/rtk_runs" \
             homebrew_bringup \
-            ros2 bag record -s sqlite3 --polling-interval 100 -o "/rtk_runs/${run_name}/bag" "${topics[@]}") \
+            ros2 bag record -s sqlite3 --polling-interval 100 -o "/rtk_runs/${run_name}/bag" -e "${regex}") \
             > "${run}/meta/recorder_start.txt" 2>&1
     fi
     echo "${run}" > "${current_file}"
@@ -177,7 +182,7 @@ start_run() {
         else log="$(docker logs "${RECORDER_NAME}" 2>&1 || true)"; fi
         missing=()
         for t in "${topics[@]}"; do
-            grep -q "Subscribed to topic '${t}'" <<< "${log}" || missing+=("${t}")
+            grep -q -E "Subscribed to topic '${t}'" <<< "${log}" || missing+=("${t}")
         done
         [[ ${#missing[@]} -eq 0 ]] && break
         if (( SECONDS > deadline )); then
