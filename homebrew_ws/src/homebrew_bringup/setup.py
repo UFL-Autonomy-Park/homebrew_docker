@@ -27,6 +27,7 @@ setup(
     entry_points={
         "console_scripts": [
             "mavlink_rates = homebrew_bringup.mavlink_rates:main",
+            "rtcm_xrce_bridge = homebrew_bringup.rtcm_xrce_bridge:main",
         ],
     },
 )

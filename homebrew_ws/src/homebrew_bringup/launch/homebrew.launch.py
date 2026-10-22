@@ -16,7 +16,6 @@ from launch.launch_description_sources import (
 from launch.substitutions import (
     LaunchConfiguration,
     PathJoinSubstitution,
-    PythonExpression,
 )
 from launch_ros.substitutions import FindPackageShare
 from typing import Tuple
@@ -156,6 +155,72 @@ def make_mavlink_rates_node(context):
     ]
 
 
+def make_ntrip_nodes(context):
+    """NTRIP client for RTK corrections, wired to whichever bridge is running.
+
+    The client sends the vehicle's GPS fix back to the caster as GGA; the Emlid
+    caster streams nothing without it. It runs as its own process: if the
+    caster is unreachable it exits and respawns without affecting the bridge.
+    - MAVROS: MAVROS's gps_rtk plugin forwards the corrections, and MAVROS
+      provides the fix.
+    - XRCE agent: rtcm_xrce_bridge splits the corrections into px4_msgs/RtcmData
+      for fmu/in/rtcm_corrections and provides the fix from fmu/out/vehicle_gnss.
+      Needs PX4 firmware with PR #29368 (past v1.18.0-rc1); without it PX4 has
+      no subscriber and the corrections go nowhere.
+    """
+    if not _is_true(context, "launch_ntrip"):
+        return []
+    namespace = LaunchConfiguration("mavros_namespace")
+    if _is_true(context, "launch_mavros"):
+        # MAVROS 2.16 puts its topics under <namespace>/mavros/
+        remappings = [
+            ("rtcm", "mavros/gps_rtk/send_rtcm"),
+            ("fix", "mavros/global_position/raw/fix"),
+        ]
+        bridge = []
+    elif _is_true(context, "launch_xrce_agent"):
+        remappings = [
+            ("rtcm", "rtcm_bridge/rtcm"),
+            ("fix", "rtcm_bridge/fix"),
+        ]
+        bridge = [
+            Node(
+                package="homebrew_bringup",
+                executable="rtcm_xrce_bridge",
+                name="rtcm_xrce_bridge",
+                namespace=namespace,
+                output="screen",
+                respawn=True,
+                respawn_delay=5.0,
+            )
+        ]
+    else:
+        return []
+    return [
+        Node(
+            package="ntrip_client",
+            executable="ntrip_ros.py",
+            name="ntrip_client",
+            namespace=namespace,
+            parameters=[
+                {
+                    "host": LaunchConfiguration("ntrip_host"),
+                    "port": LaunchConfiguration("ntrip_port"),
+                    "mountpoint": LaunchConfiguration("ntrip_mountpoint"),
+                    "authenticate": True,
+                    "username": LaunchConfiguration("ntrip_username"),
+                    "password": LaunchConfiguration("ntrip_password"),
+                    "rtcm_message_package": "mavros_msgs",
+                }
+            ],
+            remappings=remappings,
+            respawn=True,
+            respawn_delay=10.0,
+        ),
+        *bridge,
+    ]
+
+
 def make_static_transform_node(
     *,
     node_name: str,
@@ -200,7 +265,6 @@ def make_static_transform_node(
 def generate_launch_description() -> LaunchDescription:
     launch_zed = LaunchConfiguration("launch_zed")
     launch_mavros = LaunchConfiguration("launch_mavros")
-    launch_ntrip = LaunchConfiguration("launch_ntrip")
     launch_xrce_agent = LaunchConfiguration("launch_xrce_agent")
 
     zed_model = LaunchConfiguration("zed_model")
@@ -211,11 +275,6 @@ def generate_launch_description() -> LaunchDescription:
     mavros_tgt_system = LaunchConfiguration("mavros_tgt_system")
     mavros_plugins = LaunchConfiguration("mavros_plugins")
 
-    ntrip_host = LaunchConfiguration("ntrip_host")
-    ntrip_port = LaunchConfiguration("ntrip_port")
-    ntrip_mountpoint = LaunchConfiguration("ntrip_mountpoint")
-    ntrip_username = LaunchConfiguration("ntrip_username")
-    ntrip_password = LaunchConfiguration("ntrip_password")
 
     zed_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -271,44 +330,6 @@ def generate_launch_description() -> LaunchDescription:
                 [FindPackageShare("mavros"), "launch", "px4_config.yaml"]
             ),
         }.items(),
-    )
-
-    # RTCM corrections from the NTRIP caster, forwarded to the FCU by MAVROS's
-    # gps_rtk plugin. Runs as its own process: if the caster is unreachable it
-    # exits and respawns without affecting MAVROS. The client sends the
-    # vehicle's GPS fix back as GGA; the Emlid caster streams nothing without it.
-    # Only runs with MAVROS: nothing else forwards its corrections to the FCU.
-    ntrip_client_node = Node(
-        package="ntrip_client",
-        executable="ntrip_ros.py",
-        name="ntrip_client",
-        namespace=mavros_namespace,
-        parameters=[
-            {
-                "host": ntrip_host,
-                "port": ntrip_port,
-                "mountpoint": ntrip_mountpoint,
-                "authenticate": True,
-                "username": ntrip_username,
-                "password": ntrip_password,
-                "rtcm_message_package": "mavros_msgs",
-            }
-        ],
-        # MAVROS 2.16 puts its topics under <namespace>/mavros/
-        remappings=[
-            ("rtcm", "mavros/gps_rtk/send_rtcm"),
-            ("fix", "mavros/global_position/raw/fix"),
-        ],
-        respawn=True,
-        respawn_delay=10.0,
-        condition=IfCondition(
-            PythonExpression(
-                [
-                    "'", launch_ntrip, "'.lower() == 'true' and '",
-                    launch_mavros, "'.lower() == 'true'",
-                ]
-            )
-        ),
     )
 
     return LaunchDescription(
@@ -391,7 +412,7 @@ def generate_launch_description() -> LaunchDescription:
                     mavros_launch,
                     OpaqueFunction(function=make_mavlink_rates_node),
                     OpaqueFunction(function=make_xrce_agent),
-                    ntrip_client_node,
+                    OpaqueFunction(function=make_ntrip_nodes),
                     make_static_transform_node(
                         node_name="static_zed_tf_publisher",
                         namespace=mavros_namespace,
