@@ -55,9 +55,8 @@ services:
     restart: "no"
     container_name: autonomypark-rise
     # Relative to this directory (~/homebrew_docker), so they do not depend on
-    # whose home `sudo` uses. The node writes its per-tick log and summary to
-    # ~/apark_rise_logs (log_dir) and its trajectory CSV under real_data/ in
-    # the working directory: both land in ~/apark_rise_logs on the Jetson.
+    # whose home `sudo` uses. The node writes one folder per run to
+    # ~/apark_rise_logs (log_dir): ~/apark_rise_logs on the Jetson.
     volumes:
       - ../experiment_ws:/root/experiment_ws
       - ../apark_rise_logs:/root/apark_rise_logs

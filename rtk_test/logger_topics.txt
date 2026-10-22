@@ -1,0 +1,24 @@
+# PX4 logger topics for the RTCM over uXRCE-DDS tests (rtk_test/).
+# On the SD card as /etc/logging/logger_topics.txt; install with
+# rtk_test/px4_console.py install-logger-topics, then reboot PX4.
+# Added to SDLOG_PROFILE's topics; for one already logged, sets its interval.
+# Format: <topic> <interval ms> <instance>. Interval 0 logs every message.
+# Lines must stay under 80 characters: PX4 reads them 79 at a time.
+#
+# Every correction chunk, from every source (MAVLink, DDS, ...)
+rtcm_corrections 0 0
+rtcm_corrections 0 1
+rtcm_corrections 0 2
+rtcm_corrections 0 3
+# Every receiver sample (default: 1 Hz), for per-sample fix_type
+sensor_gnss 0 0
+sensor_gnss 0 1
+vehicle_gnss 0 0
+sensors_status_gnss 0 0
+# Clock offset to the companion (DDS or MAVLink), for latency
+timesync_status 0 0
+timesync_status 0 1
+timesync_status 0 2
+# message_gaps: chunks the logger missed, to tell from real losses
+logger_status 0 0
+logger_status 0 1

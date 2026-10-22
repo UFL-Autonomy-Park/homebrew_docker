@@ -96,7 +96,10 @@ RUN git init -q /tmp/px4_msgs_src/src/px4_msgs && \
     source /opt/ros/${ROS_DISTRO}/setup.bash && \
     cd /tmp/px4_msgs_src && \
     colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO} && \
-    rm -rf /tmp/px4_msgs_src
+    rm -rf /tmp/px4_msgs_src && \
+    printf 'PX4_FIRMWARE_REPO=%s\nPX4_FIRMWARE_REF=%s\nPX4_MSGS_PACKAGE_REF=%s\n' \
+        "${PX4_FIRMWARE_REPO}" "${PX4_FIRMWARE_REF}" "${PX4_MSGS_PACKAGE_REF}" \
+        > /opt/ros/${ROS_DISTRO}/share/px4_msgs/build_info
 
 # Micro XRCE-DDS Agent (LAUNCH_XRCE_AGENT), the uXRCE-DDS alternative to
 # MAVROS. Pinned to v2.4.3: do not change. Its superbuild bundles its own

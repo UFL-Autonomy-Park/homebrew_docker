@@ -1,0 +1,10 @@
+{
+  "_comment": "Pass criteria for analyze_run.py and compare_runs.py. Set and commit these BEFORE testing; changing them after seeing results makes the evidence worthless.",
+  "max_lost": 0,
+  "latency_p99_ms_max": 100,
+  "ttff_s_max": 120,
+  "fixed_fraction_min": 0.99,
+  "max_unexpected_drops": 0,
+  "ttff_vs_mavros_median_max_diff_s": 10,
+  "fixed_fraction_vs_mavros_min_diff": -0.005
+}
