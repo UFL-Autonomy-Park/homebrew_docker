@@ -66,10 +66,33 @@ RUN apt-get update && \
     rm -rf /tmp/ntrip_src && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# px4_msgs, pinned to the PX4 release the vehicles' flight controllers run.
+# px4_msgs, generated from the PX4 firmware under test: PX4 PR #29368 (RTK
+# corrections over uXRCE-DDS on /fmu/in/rtcm_corrections), branch
+# dakejahl/dds-rtcm-corrections, based on main past v1.18.0-rc1.
 # uXRCE-DDS topics only deserialize if these definitions match the firmware's.
-ARG PX4_MSGS_VERSION=v1.16.2
-RUN git clone --branch ${PX4_MSGS_VERSION} --depth 1 https://github.com/PX4/px4_msgs.git /tmp/px4_msgs_src/src/px4_msgs && \
+# px4_msgs is only synced from PX4's main and release branches, not from PR
+# branches, so this does what PX4's sync_to_px4_msgs.yml workflow does: take the
+# package from px4_msgs main and replace its .msg/.srv files with the
+# firmware's. Pinned to commits; set PX4_FIRMWARE_REF to the commit flashed.
+ARG PX4_MSGS_PACKAGE_REF=2e892300d8c20d3c29e198e324a10854b40ab8d3
+ARG PX4_FIRMWARE_REPO=https://github.com/PX4/PX4-Autopilot.git
+ARG PX4_FIRMWARE_REF=4dfcb7b4370ec7e03471038e821578d5794ec738
+RUN git init -q /tmp/px4_msgs_src/src/px4_msgs && \
+    cd /tmp/px4_msgs_src/src/px4_msgs && \
+    git fetch -q --depth 1 https://github.com/PX4/px4_msgs.git ${PX4_MSGS_PACKAGE_REF} && \
+    git checkout -q FETCH_HEAD && \
+    git init -q /tmp/px4_fw && \
+    cd /tmp/px4_fw && \
+    git fetch -q --depth 1 --filter=blob:none ${PX4_FIRMWARE_REPO} ${PX4_FIRMWARE_REF} && \
+    git sparse-checkout set msg srv && \
+    git checkout -q FETCH_HEAD && \
+    rm -f /tmp/px4_msgs_src/src/px4_msgs/msg/*.msg /tmp/px4_msgs_src/src/px4_msgs/srv/*.srv && \
+    cp msg/*.msg /tmp/px4_msgs_src/src/px4_msgs/msg/ && \
+    cp msg/versioned/*.msg /tmp/px4_msgs_src/src/px4_msgs/msg/ && \
+    cp srv/*.srv /tmp/px4_msgs_src/src/px4_msgs/srv/ && \
+    (cp srv/versioned/*.srv /tmp/px4_msgs_src/src/px4_msgs/srv/ 2>/dev/null || true) && \
+    test -f /tmp/px4_msgs_src/src/px4_msgs/msg/RtcmData.msg && \
+    rm -rf /tmp/px4_fw && \
     source /opt/ros/${ROS_DISTRO}/setup.bash && \
     cd /tmp/px4_msgs_src && \
     colcon build --merge-install --install-base /opt/ros/${ROS_DISTRO} && \
