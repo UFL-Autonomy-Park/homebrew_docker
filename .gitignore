@@ -5,3 +5,7 @@ logs/
 homebrew_ws/build/
 homebrew_ws/install/
 homebrew_ws/log/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
