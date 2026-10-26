@@ -2,14 +2,21 @@
 """Run PX4 console (NuttShell) commands over MAVLink and save their output.
 
 Uses MAVLink SERIAL_CONTROL like PX4's Tools/mavlink_shell.py, so it needs a
-MAVLink link: with the XRCE agent on TELEM2, use the flight controller's USB
-port (close QGroundControl first, it holds the port) or a telemetry radio.
+MAVLink link to PX4. In XRCE mode TELEM2 carries uXRCE-DDS, not MAVLink, so the
+Jetson cannot use it. Run this on the ground station, on the bench before and
+after each run, over either:
+  - a USB cable to the flight controller (--device /dev/ttyACM0), or
+  - the telemetry radio QGroundControl uses (--device /dev/ttyUSB0 --baud 57600):
+    close QGroundControl first, it holds the port.
+QGroundControl's own MAVLink Console (Analyze Tools) runs the same commands by
+hand if neither works.
 
   # Before and after every run, into the run directory
   python3 rtk_test/px4_console.py snapshot --device /dev/ttyACM0 \\
       --out logs/rtk_runs/<run>/meta/px4_before.txt
 
-  # Once per vehicle: put logger_topics.txt on the SD card, then reboot PX4
+  # Once per vehicle: logger_topics.txt on the SD card and SDLOG_MODE 2
+  # (log from boot until shutdown), then reboot PX4
   python3 rtk_test/px4_console.py install-logger-topics --device /dev/ttyACM0
 
   # Any commands
@@ -19,8 +26,8 @@ snapshot records the build (ver all), all parameters, perf counters (uavcan:
 gnss: rtcm stream pub failed counts chunks lost toward CAN), uavcan, uXRCE-DDS
 client and logger status, CPU load, the boot log (dmesg: the logger prints
 "logging N topics from logger_topics.txt" when it reads the file), and the
-latest GNSS samples. It also checks SDLOG_MODE: the default (0) only logs
-while armed, so a bench run would have no log.
+latest GNSS samples. It also checks SDLOG_MODE is 2: the default (0) only
+logs while armed, so a bench run would have no log.
 """
 import argparse
 import re
@@ -125,9 +132,9 @@ def snapshot(shell, out_path):
         parts.append(f'\n===== {cmd}{"" if complete else "  [INCOMPLETE: no prompt before timeout]"}\n{text}\n')
         if cmd == 'param show SDLOG_*':
             m = re.search(r'SDLOG_MODE\s*\[[^\]]*\]\s*:\s*(-?\d+)', text)
-            if m and m.group(1) == '0':
-                warnings.append('SDLOG_MODE is 0: PX4 only logs while armed. For bench runs set it '
-                                'to 1 or 2 and reboot.')
+            if m and m.group(1) != '2':
+                warnings.append(f'SDLOG_MODE is {m.group(1)}, not 2 (from boot until shutdown): runs may '
+                                'not be fully logged. install-logger-topics sets it; reboot after.')
         if cmd == 'dmesg' and 'logger_topics.txt' not in text:
             warnings.append('Boot log does not mention logger_topics.txt: the extra topics '
                             '(every correction chunk) may not be logged.')
@@ -159,8 +166,12 @@ def install_logger_topics(shell, path, sd_root):
     if got != want:
         print('\n'.join(got))
         raise SystemExit(f'Verification failed: {target} differs from {path} (shown above)')
-    print(f'Installed and verified {target} ({len(lines)} lines). Reboot PX4 to apply; after the '
-          'reboot, a snapshot should show "logging N topics from logger_topics.txt" in dmesg.')
+    shell.run('param set SDLOG_MODE 2')
+    text, _ = shell.run('param show SDLOG_MODE')
+    if not re.search(r'SDLOG_MODE\s*\[[^\]]*\]\s*:\s*2\b', text):
+        raise SystemExit(f'Could not set SDLOG_MODE to 2:\n{text}')
+    print(f'Installed and verified {target} ({len(lines)} lines) and set SDLOG_MODE 2. Reboot PX4 to apply '
+          'both; after the reboot, a snapshot should show "logging N topics from logger_topics.txt" in dmesg.')
 
 
 def main():

@@ -1,6 +1,8 @@
 {
   "_comment": "Pass criteria for analyze_run.py and compare_runs.py. Set and commit these BEFORE testing; changing them after seeing results makes the evidence worthless.",
   "max_lost": 0,
+  "_max_lost_caster_to_client": "null: losses between the caster and ntrip_client (the vehicle's Wi-Fi, e.g. switching access points) are reported, not judged; they are the same with MAVROS. A number makes them a pass criterion.",
+  "max_lost_caster_to_client": null,
   "latency_p99_ms_max": 100,
   "ttff_s_max": 120,
   "fixed_fraction_min": 0.99,

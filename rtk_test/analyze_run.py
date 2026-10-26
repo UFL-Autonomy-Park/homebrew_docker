@@ -821,6 +821,12 @@ def verdicts(s, c):
                        ('1_to_2_frames', 'ntrip_client -> FCU link frames lost'),
                        ('2_to_3_chunks', 'DDS -> PX4 chunks lost'),
                        ('1_to_3_frames', 'end to end (ntrip_client -> PX4) frames lost')):
+        if key == '0_to_1_frames' and key in comp and c.get('max_lost_caster_to_client') is None:
+            # The vehicle's Wi-Fi link to the caster: identical in both modes, so
+            # reported here and compared against MAVROS, not judged
+            out.append({'check': label, 'result': 'INFO', 'value': comp[key]['missing'], 'limit': None,
+                        'note': "the vehicle's network link to the caster (e.g. Wi-Fi roaming), same for MAVROS"})
+            continue
         if key in comp:
             v = comp[key].get('missing_unexplained', comp[key]['missing'])
             gaps = (s.get('px4') or {}).get('logger_message_gaps')
