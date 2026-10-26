@@ -202,6 +202,7 @@ def generate_launch_description() -> LaunchDescription:
     launch_mavros = LaunchConfiguration("launch_mavros")
     launch_ntrip = LaunchConfiguration("launch_ntrip")
     launch_xrce_agent = LaunchConfiguration("launch_xrce_agent")
+    launch_px4_interface = LaunchConfiguration("launch_px4_interface")
 
     zed_model = LaunchConfiguration("zed_model")
     zed_camera_name = LaunchConfiguration("zed_camera_name")
@@ -311,6 +312,28 @@ def generate_launch_description() -> LaunchDescription:
         ),
     )
 
+    # aero_common's aero_px4_interface: MAVROS's position and velocity in the
+    # park frame (autonomy_park/pose, twist), the setpoint relay to MAVROS and
+    # the joystick buttons. Started here so an experiment only brings its own
+    # code. Needs MAVROS. Outside the group below: its /tf must stay global
+    # for RViz on the lab PC, not move under the vehicle's namespace.
+    px4_interface_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [FindPackageShare("aero_bringup"), "launch", "px4_interface.launch.py"]
+            )
+        ),
+        launch_arguments={"vehicle": mavros_namespace}.items(),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'", launch_px4_interface, "'.lower() == 'true' and '",
+                    launch_mavros, "'.lower() == 'true'",
+                ]
+            )
+        ),
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -377,6 +400,10 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "ntrip_port", default_value="2101", description="NTRIP caster port"
             ),
+            DeclareLaunchArgument(
+                "launch_px4_interface",
+                description="Start aero_common's aero_px4_interface (needs MAVROS)",
+            ),
             DeclareLaunchArgument("ntrip_mountpoint", description="NTRIP mountpoint"),
             DeclareLaunchArgument("ntrip_username", description="NTRIP username"),
             DeclareLaunchArgument("ntrip_password", description="NTRIP password"),
@@ -403,5 +430,6 @@ def generate_launch_description() -> LaunchDescription:
                     ),
                 ]
             ),
+            px4_interface_launch,
         ]
     )

@@ -223,7 +223,7 @@ sudo ./docker/jetson_build_dockerfile_from_sdk_and_l4T_version.sh \
 
 ```bash
 cd ~
-git clone https://github.com/UFL-Autonomy-Park/homebrew_docker.git
+git clone --recurse-submodules https://github.com/UFL-Autonomy-Park/homebrew_docker.git
 cd ~/homebrew_docker
 cp .env.example .env
 ```
@@ -407,7 +407,7 @@ sudo docker images ufl-autonomy-park/homebrew-jetson
 
 The last command should list the image with tag `dev`.
 
-### 3.8 Build the homebrew_bringup package
+### 3.8 Build homebrew_ws (homebrew_bringup and aero_common)
 
 > [!IMPORTANT]
 > The Jetson has no ROS 2: `ros2` and `colcon` exist **only inside the
@@ -432,11 +432,13 @@ what this step fixes) and gives you the container's prompt. In the
 **container's** shell:
 
 ```bash
-colcon build --packages-select homebrew_bringup
+colcon build
 exit
 ```
 
-The build should end with `Summary: 1 package finished`. Back on the
+The build should end with `Summary: 8 packages finished`: homebrew_bringup
+and aero_common's seven packages (`homebrew_ws/src/aero_common`, a git
+submodule; see [aero_common on the vehicle](#aero_common-on-the-vehicle)). Back on the
 **Jetson**: the container ran as root, so give the build output back to your
 user, then check the launch file was installed:
 
@@ -517,16 +519,45 @@ The last command should print `enabled`.
 
 ## After setup: changing `homebrew_ws`
 
-After any change under `homebrew_ws/src/`, including a `git pull`, rebuild and
-recreate the container. A plain `docker compose up -d` does not restart an
-unchanged container, so it would keep running the old launch file.
+After any change under `homebrew_ws/src/`, including a `git pull`, update
+aero_common to the version this repository pins, rebuild and recreate the
+container. A plain `docker compose up -d` does not restart an unchanged
+container, so it would keep running the old launch file.
 
 ```bash
 cd ~/homebrew_docker
-sudo docker compose run --rm homebrew_bringup bash -c "colcon build --packages-select homebrew_bringup"
+git submodule update --init
+sudo docker compose run --rm homebrew_bringup bash -c "colcon build"
 sudo chown -R "$USER:$USER" homebrew_ws/build homebrew_ws/install homebrew_ws/log
 sudo docker compose up -d --force-recreate
 ```
+
+### aero_common on the vehicle
+
+`homebrew_ws/src/aero_common` is
+[aero_common](https://github.com/UFL-Autonomy-Park/aero_common), pinned to a
+release. `homebrew.launch.py` starts its `aero_px4_interface` with MAVROS
+(`LAUNCH_PX4_INTERFACE=true` in `.env`): the vehicle's position and velocity
+in the park frame (`autonomy_park/pose`, `twist`), the relay of park-frame
+setpoints to MAVROS, and the controller's arm and land buttons. An
+experiment then only brings its own code, in `~/experiment_ws`.
+
+`aero_px4_interface` refuses to start until the ground's height at the park
+origin is measured, once per vehicle setup (aero_common README, "Measuring
+`origin_ground_height_m`"); MAVROS runs either way. Its log is in the
+container's output, **on the Jetson**:
+
+```bash
+cd ~/homebrew_docker
+sudo docker compose logs homebrew_bringup | grep px4_interface
+```
+
+**`USE_EXPERIMENT_WS`** decides whether a container also sources
+`~/experiment_ws`, after `homebrew_ws`. `homebrew_bringup` never does, so a
+broken or half-built experiment cannot stop MAVROS or `aero_px4_interface`
+at boot; the experiment services (`*.experiment.yml`) do. Don't put
+aero_common packages in `~/experiment_ws`: they would shadow the ones in
+`homebrew_ws`.
 
 > [!NOTE]
 > Build only in the container, even on a Jetson that has ROS 2 installed: the
