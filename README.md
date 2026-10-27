@@ -535,8 +535,8 @@ sudo docker compose up -d --force-recreate
 ### aero_common on the vehicle
 
 `homebrew_ws/src/aero_common` is
-[aero_common](https://github.com/UFL-Autonomy-Park/aero_common), pinned to a
-release. `homebrew.launch.py` starts its `aero_px4_interface` with MAVROS
+[aero_common](https://github.com/UFL-Autonomy-Park/aero_common), tracking its
+`2.0.x` branch. `homebrew.launch.py` starts its `aero_px4_interface` with MAVROS
 (`LAUNCH_PX4_INTERFACE=true` in `.env`): the vehicle's position and velocity
 in the park frame (`autonomy_park/pose`, `twist`), the relay of park-frame
 setpoints to MAVROS, and the controller's arm and land buttons. An
