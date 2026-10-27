@@ -69,6 +69,8 @@ services:
       # Exactly one of these two may be true (the launch refuses both)
       - "launch_mavros:=${LAUNCH_MAVROS:-true}"
       - "launch_xrce_agent:=${LAUNCH_XRCE_AGENT:-false}"
+      # aero_common's aero_px4_interface for this vehicle (needs MAVROS)
+      - "launch_px4_interface:=${LAUNCH_PX4_INTERFACE:-true}"
       # Required, no fallback: a wrong value here mixes up vehicles
       - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
