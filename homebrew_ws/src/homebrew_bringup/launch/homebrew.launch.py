@@ -122,12 +122,12 @@ def make_xrce_agent(context):
 
 
 def make_mavlink_rates_node(context):
-    """mavlink_rates node, only with MAVROS and a non-empty MAVLINK_RATES.
+    """mavlink_rates node, only with MAVROS and MAVLINK_RATES set (not "off").
 
     mavlink_rates is "<message id>:<Hz>,..." e.g. "141:100,33:100,32:100".
     """
     spec = LaunchConfiguration("mavlink_rates").perform(context).strip()
-    if not spec or not _is_true(context, "launch_mavros"):
+    if spec.lower() in ("", "off") or not _is_true(context, "launch_mavros"):
         return []
     ids, rates = [], []
     for item in spec.split(","):
@@ -392,9 +392,9 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "mavlink_rates",
-                default_value="",
+                default_value="off",
                 description="MAVLink stream rates to request from the FCU, "
-                "'<message id>:<Hz>,...'; empty leaves PX4's defaults",
+                "'<message id>:<Hz>,...'; 'off' leaves PX4's defaults",
             ),
             DeclareLaunchArgument("ntrip_host", description="NTRIP caster address"),
             DeclareLaunchArgument(

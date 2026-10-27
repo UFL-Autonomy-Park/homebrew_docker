@@ -542,9 +542,49 @@ in the park frame (`autonomy_park/pose`, `twist`), the relay of park-frame
 setpoints to MAVROS, and the controller's arm and land buttons. An
 experiment then only brings its own code, in `~/experiment_ws`.
 
-`aero_px4_interface` refuses to start until the ground's height at the park
-origin is measured, once per vehicle setup (aero_common README, "Measuring
-`origin_ground_height_m`"); MAVROS runs either way. Its log is in the
+#### `origin_ground_height_m`: measure it once
+
+`aero_px4_interface` reports `autonomy_park/pose` with z = height above the
+ground at the park origin. PX4 only knows GNSS altitude (WGS-84 ellipsoidal,
+as MAVROS reports it), so the node needs to be told what that altitude is on
+the ground at the origin: `origin_ground_height_m`. It is read from
+`aero_bringup/config/park_frame.yaml` inside aero_common and has no default.
+If it is missing, the node exits at startup with a missing-parameter error
+and publishes no pose, twist or park-frame setpoint relay. MAVROS and the
+rest of the container are unaffected, so this alone does not restart the
+container.
+
+Measure it once, and again after changing the GPS module, the NTRIP
+mountpoint, or PX4's `EKF2_GPS_POS_*` / `EKF2_IMU_POS_*`:
+
+1. Put the vehicle on the ground at the park origin, level, with RTK fixed.
+2. Measure `h`, the height above the ground of PX4's body origin (with all of
+   `EKF2_GPS_POS_*` and `EKF2_IMU_POS_*` at 0, the default, that is the GPS
+   antenna).
+3. Read the altitude for a few seconds and note a typical value, **on the lab
+   PC**:
+
+   ```bash
+   ros2 topic echo --field altitude /homebrew08/mavros/global_position/global
+   ```
+
+4. `origin_ground_height_m` = that reading − `h`. Add it to aero_common's
+   `aero_bringup/config/park_frame.yaml` as
+   `origin_ground_height_m: <meters>`.
+
+The value describes the park's ground, not one vehicle, so commit it to
+aero_common (branch `2.0.x`) once. Every vehicle then gets it by updating the
+submodule and rebuilding, as in "After setup" above
+(`git submodule update --init --remote`, then commit the new submodule
+version here).
+
+Check, on the lab PC, with the vehicle at the origin:
+
+```bash
+ros2 topic echo --field pose.position /homebrew08/autonomy_park/pose
+```
+
+x and y should read about 0 and z about `h`. The node's log is in the
 container's output, **on the Jetson**:
 
 ```bash
