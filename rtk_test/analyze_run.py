@@ -755,6 +755,12 @@ def fix_analysis(ulog, hop3_raw, clock, events, window):
         ttff = []
         for c0 in starts:
             before = ft[t < c0 - 0.2]
+            if c0 < t[0] - 0.2:
+                # Corrections started before the run's first sample (the ULog spans the
+                # whole boot): nothing to time here, only whether the run began fixed
+                ttff.append({'corrections_from_s': float(c0), 'ttff_s': None,
+                             'note': 'already RTK fixed' if ft[0] >= FIX_RTK_FIXED else 'before the run'})
+                continue
             if len(before) and before[-1] >= FIX_RTK_FIXED:
                 ttff.append({'corrections_from_s': float(c0), 'ttff_s': None, 'note': 'already RTK fixed'})
                 continue
@@ -880,7 +886,7 @@ def verdicts(s, c):
             round(s['latency_ms']['p99'], 1), c['latency_p99_ms_max'])
     fix = s.get('fix') or {}
     for rid, r in (fix.get('receivers') or {}).items():
-        firsts = [x for x in r['time_to_rtk_fixed'] if x.get('note') != 'already RTK fixed']
+        firsts = [x for x in r['time_to_rtk_fixed'] if not x.get('note')]
         if firsts:
             v = firsts[0]['ttff_s']
             add(f'receiver {rid}: time to RTK fixed (s)', v is not None and v <= c['ttff_s_max'],

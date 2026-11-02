@@ -20,12 +20,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def first_ttff(r):
-    xs = [x for x in r.get('time_to_rtk_fixed', []) if x.get('note') != 'already RTK fixed']
+    xs = [x for x in r.get('time_to_rtk_fixed', []) if not x.get('note')]
     return xs[0]['ttff_s'] if xs else None
 
 
 def recovery_ttffs(r):
-    xs = [x['ttff_s'] for x in r.get('time_to_rtk_fixed', [])[1:] if x.get('note') != 'already RTK fixed']
+    xs = [x['ttff_s'] for x in r.get('time_to_rtk_fixed', [])[1:] if not x.get('note')]
     return [x for x in xs if x is not None]
 
 
