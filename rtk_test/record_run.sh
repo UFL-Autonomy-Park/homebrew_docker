@@ -91,9 +91,11 @@ write_meta() {
     local meta="${run}/meta"
     mkdir -p "${meta}"
     {
-        git -C "${REPO_DIR}" rev-parse HEAD
-        git -C "${REPO_DIR}" status --short
-        git -C "${REPO_DIR}" diff
+        # safe.directory: run with sudo, root does not own the checkout
+        git -c safe.directory="${REPO_DIR}" -C "${REPO_DIR}" rev-parse HEAD
+        git -c safe.directory="${REPO_DIR}" -C "${REPO_DIR}" status --short
+        git -c safe.directory="${REPO_DIR}" -C "${REPO_DIR}" diff
+        git -c safe.directory="${REPO_DIR}" -C "${REPO_DIR}" submodule status
     } > "${meta}/git.txt" 2>&1 || true
     if [[ -r "${REPO_DIR}/.env" ]]; then
         sed -E 's/^(NTRIP_PASSWORD|NTRIP_USERNAME)=.*/\1=<redacted>/' "${REPO_DIR}/.env" > "${meta}/env.txt"
