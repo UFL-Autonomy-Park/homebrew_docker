@@ -1,0 +1,4 @@
+[submodule "homebrew_ws/src/aero_common"]
+	path = homebrew_ws/src/aero_common
+	url = https://github.com/UFL-Autonomy-Park/aero_common.git
+	branch = 2.0.x

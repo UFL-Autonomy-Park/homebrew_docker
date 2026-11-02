@@ -16,6 +16,7 @@ from launch.launch_description_sources import (
 from launch.substitutions import (
     LaunchConfiguration,
     PathJoinSubstitution,
+    PythonExpression,
 )
 from launch_ros.substitutions import FindPackageShare
 from typing import Tuple
@@ -121,12 +122,12 @@ def make_xrce_agent(context):
 
 
 def make_mavlink_rates_node(context):
-    """mavlink_rates node, only with MAVROS and a non-empty MAVLINK_RATES.
+    """mavlink_rates node, only with MAVROS and MAVLINK_RATES set (not "off").
 
     mavlink_rates is "<message id>:<Hz>,..." e.g. "141:100,33:100,32:100".
     """
     spec = LaunchConfiguration("mavlink_rates").perform(context).strip()
-    if not spec or not _is_true(context, "launch_mavros"):
+    if spec.lower() in ("", "off") or not _is_true(context, "launch_mavros"):
         return []
     ids, rates = [], []
     for item in spec.split(","):
@@ -266,6 +267,7 @@ def generate_launch_description() -> LaunchDescription:
     launch_zed = LaunchConfiguration("launch_zed")
     launch_mavros = LaunchConfiguration("launch_mavros")
     launch_xrce_agent = LaunchConfiguration("launch_xrce_agent")
+    launch_px4_interface = LaunchConfiguration("launch_px4_interface")
 
     zed_model = LaunchConfiguration("zed_model")
     zed_camera_name = LaunchConfiguration("zed_camera_name")
@@ -332,6 +334,28 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
+    # aero_common's aero_px4_interface: MAVROS's position and velocity in the
+    # park frame (autonomy_park/pose, twist), the setpoint relay to MAVROS and
+    # the joystick buttons. Started here so an experiment only brings its own
+    # code. Needs MAVROS. Outside the group below: its /tf must stay global
+    # for RViz on the lab PC, not move under the vehicle's namespace.
+    px4_interface_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [FindPackageShare("aero_bringup"), "launch", "px4_interface.launch.py"]
+            )
+        ),
+        launch_arguments={"vehicle": mavros_namespace}.items(),
+        condition=IfCondition(
+            PythonExpression(
+                [
+                    "'", launch_px4_interface, "'.lower() == 'true' and '",
+                    launch_mavros, "'.lower() == 'true'",
+                ]
+            )
+        ),
+    )
+
     return LaunchDescription(
         [
             DeclareLaunchArgument(
@@ -390,13 +414,17 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "mavlink_rates",
-                default_value="",
+                default_value="off",
                 description="MAVLink stream rates to request from the FCU, "
-                "'<message id>:<Hz>,...'; empty leaves PX4's defaults",
+                "'<message id>:<Hz>,...'; 'off' leaves PX4's defaults",
             ),
             DeclareLaunchArgument("ntrip_host", description="NTRIP caster address"),
             DeclareLaunchArgument(
                 "ntrip_port", default_value="2101", description="NTRIP caster port"
+            ),
+            DeclareLaunchArgument(
+                "launch_px4_interface",
+                description="Start aero_common's aero_px4_interface (needs MAVROS)",
             ),
             DeclareLaunchArgument("ntrip_mountpoint", description="NTRIP mountpoint"),
             DeclareLaunchArgument("ntrip_username", description="NTRIP username"),
@@ -424,5 +452,6 @@ def generate_launch_description() -> LaunchDescription:
                     ),
                 ]
             ),
+            px4_interface_launch,
         ]
     )

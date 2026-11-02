@@ -1,52 +1,24 @@
 # apark_rise_controller on the Jetson, next to homebrew_bringup's MAVROS, in the
 # same image (autonomy_park_sitl, ros2_ws/src/apark_rise_controller/README.md,
-# "Running on board"). Two services:
-#
-#   px4_telemetry  converts MAVROS's position and velocity to the park frame
-#                  (autonomy_park/pose and autonomy_park/twist) for the
-#                  controller; runs in the background for the session
-#   rise           the controller; run in the foreground, inside tmux
-#
-# Both use the workspace in ~/experiment_ws (mounted at /root/experiment_ws,
-# sourced by the entrypoint when USE_EXPERIMENT_WS=true), built with the uv
-# virtual environment ~/experiment_ws/venv that holds JAX (README).
+# "Running on board"). The park-frame position and the setpoint relay come
+# from aero_common's aero_px4_interface, which homebrew_bringup starts with
+# MAVROS; aero_common's other packages (enclosure.yaml, aero_offboard_checks)
+# are in homebrew_ws too. The controller itself is in ~/experiment_ws
+# (mounted at /root/experiment_ws, sourced after homebrew_ws when
+# USE_EXPERIMENT_WS=true), built with the uv virtual environment
+# ~/experiment_ws/venv that holds JAX (README). Run it in the foreground,
+# inside tmux:
 #
 #   cd ~/homebrew_docker
-#   sudo docker compose -f docker-compose.yml -f rise.experiment.yml up -d px4_telemetry
 #   sudo PARAMS=baseline_traj1.yaml docker compose -f docker-compose.yml -f rise.experiment.yml run --rm rise
 #   sudo PARAMS=baseline_traj1.yaml FLY=true docker compose -f docker-compose.yml -f rise.experiment.yml run --rm rise
 #
 # PARAMS (required) is a controller-tuning file in apark_rise_controller's
 # param/ folder, <controller>_traj<N>.yaml.
 #
-# The profile keeps a plain `docker compose up` from ever starting either.
+# The profile keeps a plain `docker compose up` from ever starting it.
 
 services:
-  px4_telemetry:
-    # Same image, devices, network, DDS and time-sync setup as MAVROS
-    extends:
-      file: docker-compose.yml
-      service: homebrew_bringup
-    profiles: ["experiment"]
-    restart: "no"
-    # extends copies homebrew_bringup's container_name; never reuse the name
-    # of the running MAVROS container
-    container_name: autonomypark-px4-telemetry
-    volumes:
-      - ../experiment_ws:/root/experiment_ws
-    environment:
-      USE_EXPERIMENT_WS: "true"
-    command:
-      - ros2
-      - run
-      - px4_telemetry
-      - px4_telemetry_node
-      - --ros-args
-      - -r
-      - "__ns:=/${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
-      - --params-file
-      - /root/experiment_ws/install/px4_telemetry/share/px4_telemetry/param/park_coordinates.yaml
-
   rise:
     extends:
       file: docker-compose.yml
@@ -70,8 +42,8 @@ services:
       - rise_controller.launch.py
       - "namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
       # Required; the launch file refuses an unknown one and lists the
-      # choices. Not ${PARAMS:?}: compose checks that for every service,
-      # px4_telemetry too
+      # choices. Not ${PARAMS:?}: compose checks that for every service in
+      # the files it is given, homebrew_bringup too
       - "params_file:=${PARAMS:-PARAMS-not-set}"
       # On the Jetson, next to MAVROS
       - mavros_link:=local

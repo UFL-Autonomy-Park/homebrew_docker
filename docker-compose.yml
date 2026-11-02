@@ -69,13 +69,16 @@ services:
       # Exactly one of these two may be true (the launch refuses both)
       - "launch_mavros:=${LAUNCH_MAVROS:-true}"
       - "launch_xrce_agent:=${LAUNCH_XRCE_AGENT:-false}"
+      # aero_common's aero_px4_interface for this vehicle (needs MAVROS)
+      - "launch_px4_interface:=${LAUNCH_PX4_INTERFACE:-true}"
       # Required, no fallback: a wrong value here mixes up vehicles
       - "fcu_url:=${FCU_URL:?set FCU_URL in .env}"
       - "mavros_namespace:=${MAVROS_NAMESPACE:?set MAVROS_NAMESPACE in .env}"
       - "mavros_tgt_system:=${MAVROS_TGT_SYSTEM:?set MAVROS_TGT_SYSTEM in .env}"
       - "mavros_plugins:=${MAVROS_PLUGINS:-minimal}"
-      # Empty (the default) leaves PX4's stream rates alone
-      - "mavlink_rates:=${MAVLINK_RATES:-}"
+      # Empty or unset (the default) leaves PX4's stream rates alone. Passed as
+      # "off" then: ros2 launch rejects an empty "name:=" and exits
+      - "mavlink_rates:=${MAVLINK_RATES:-off}"
       - "launch_ntrip:=${LAUNCH_NTRIP:-true}"
       - "ntrip_host:=${NTRIP_HOST:?set NTRIP_HOST in .env}"
       - "ntrip_port:=${NTRIP_PORT:-2101}"
