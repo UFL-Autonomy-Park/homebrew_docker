@@ -62,7 +62,7 @@ git fetch origin
 git checkout rtk_tests_for_px4_1_18
 git pull
 git submodule update --init --recursive
-python3 -m pip install --user pymavlink pyulog numpy matplotlib
+python3 -m pip install --user pyulog numpy matplotlib
 ```
 
 ### 1.2 Build the PX4 firmware
@@ -71,8 +71,8 @@ Once, or after the PR gets new commits. It clones the PR's branch,
 `dakejahl/dds-rtcm-corrections` in PX4/PX4-Autopilot. It uses a separate checkout so the
 SITL one in `~/autonomy_park_sitl` is untouched, and PX4's own build container
 so the compiler is the one PX4 expects. The board is the CubeOrange (from the
-main README); the first console snapshot ([3.4](#34-check-the-flight-controller-from-the-lab-pc))
-prints the hardware to confirm it.
+main README); `ver all` in [3.4](#34-check-the-flight-controller) prints the
+hardware to confirm it.
 
 In a terminal on the **lab PC**:
 
@@ -92,6 +92,10 @@ push, and rebuild the image (3.2) so the two match.
 
 ## 2. Flight controller
 
+The test itself uses only the telemetry radio, the link QGroundControl uses.
+Flashing (2.1) is the one step that needs USB: QGroundControl flashes over USB
+only.
+
 ### 2.1 Flash
 
 QGroundControl → Vehicle Setup → Firmware. Plug the FCU into the lab PC by
@@ -110,6 +114,7 @@ QGroundControl → Vehicle Setup → Parameters, then reboot:
 | `UXRCE_DDS_DOM_ID` | `0` | equals `ROS_DOMAIN_ID` |
 | `UXRCE_DDS_PTCFG` | `Custom participant` (2) | discovery-server participant (main README 8.1) |
 | `UAVCAN_PUB_RTCM` | `1` | PX4 forwards corrections to the Here4 over CAN |
+| `SDLOG_MODE` | `from boot until shutdown` (2) | the default logs only while armed, so bench runs would have no log |
 
 ### 2.3 Namespace
 
@@ -126,21 +131,37 @@ echo "uxrce_dds_client start -t serial -d /dev/ttyS1 -b p:SER_TEL2_BAUD -n homeb
 reboot
 ```
 
-### 2.4 Logging
+### 2.4 Logger topics
 
-Once per vehicle: installs `rtk_test/logger_topics.txt` on the SD card (every
-correction chunk and every receiver sample in the ULog) and sets
-`SDLOG_MODE = 2` (log from boot until shutdown, so bench runs are logged).
-Quit QGroundControl first: it holds the USB port. FCU on USB, in a terminal on
-the **lab PC**:
+Once per vehicle: `rtk_test/logger_topics.txt` on the SD card adds every
+correction chunk and every receiver sample to the ULog. PX4 reads it from
+`/fs/microsd/etc/logging/logger_topics.txt` at boot. The lines below are the
+file's entries without its comments; if you change the file, change these too.
+In QGroundControl → Analyze Tools → MAVLink Console:
 
-```bash
-cd ~/homebrew_docker
-python3 rtk_test/px4_console.py install-logger-topics --device /dev/ttyACM0
+```text
+mkdir /fs/microsd/etc
+mkdir /fs/microsd/etc/logging
+echo "rtcm_corrections 0 0" > /fs/microsd/etc/logging/logger_topics.txt
+echo "rtcm_corrections 0 1" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "rtcm_corrections 0 2" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "rtcm_corrections 0 3" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "sensor_gnss 0 0" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "sensor_gnss 0 1" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "vehicle_gnss 0 0" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "sensors_status_gnss 0 0" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "timesync_status 0 0" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "timesync_status 0 1" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "timesync_status 0 2" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "logger_status 0 0" >> /fs/microsd/etc/logging/logger_topics.txt
+echo "logger_status 0 1" >> /fs/microsd/etc/logging/logger_topics.txt
+cat /fs/microsd/etc/logging/logger_topics.txt
+reboot
 ```
 
-Then unplug and replug the USB cable to reboot PX4. The snapshot in [3.4](#34-check-the-flight-controller-from-the-lab-pc)
-verifies both took effect.
+`mkdir` reports an error for a directory that already exists; that is fine.
+`cat` must print the 13 lines. [3.4](#34-check-the-flight-controller) checks
+that PX4 read the file.
 
 ## 3. Jetson
 
@@ -212,26 +233,27 @@ sudo docker compose up -d --force-recreate
 Check the `grep` output: `LAUNCH_MAVROS=false`, `LAUNCH_XRCE_AGENT=true`,
 `LAUNCH_NTRIP=true`, and `MAVROS_NAMESPACE` equal to the namespace in 2.3.
 
-### 3.4 Check the flight controller from the lab PC
+### 3.4 Check the flight controller
 
-Quit QGroundControl. FCU on USB, in a terminal on the **lab PC**:
+In QGroundControl → Analyze Tools → MAVLink Console:
 
-```bash
-cd ~/homebrew_docker
-mkdir -p ~/rtk_sessions/$(date +%F)
-python3 rtk_test/px4_console.py snapshot --device /dev/ttyACM0 --out ~/rtk_sessions/$(date +%F)/px4_before.txt
-grep -E "HW arch|FW git-hash|FW version|logger_topics|SDLOG_MODE|UAVCAN_PUB_RTCM|UXRCE_DDS_CFG|WARNING" ~/rtk_sessions/$(date +%F)/px4_before.txt
+```text
+ver all
+param show SDLOG_MODE
+param show UAVCAN_PUB_RTCM
+param show UXRCE_DDS_CFG
+dmesg
 ```
 
-Expect: the CubeOrange as HW arch, a git hash starting `4dfcb7b4`,
-`SDLOG_MODE` 2, `UAVCAN_PUB_RTCM` 1, `UXRCE_DDS_CFG` 102 (TELEM 2), a boot
-log line `logging N topics from logger_topics.txt`, and no `WARNING`.
+Expect: the CubeOrange as `HW arch`, an `FW git-hash` starting `4dfcb7b4`,
+`SDLOG_MODE` 2, `UAVCAN_PUB_RTCM` 1, `UXRCE_DDS_CFG` 102 (TELEM 2), and in
+`dmesg` a line `logging N topics from logger_topics.txt`.
 
 ## 4. Bench gate: RTK fixed over XRCE
 
 **Do not fly until every check here passes.** Vehicle on its battery, props
 off, outdoors with open sky, base station running, QGroundControl connected
-(USB or radio).
+over the telemetry radio, no USB cable.
 
 ### 4.1 Nothing else can deliver corrections
 
@@ -327,12 +349,8 @@ sudo bash rtk_test/record_run.sh status
 
 ### 4.5 Analyze the bench run
 
-The ULog is closed only at shutdown (`SDLOG_MODE` 2). Unplug the battery,
-then plug the FCU into the lab PC by USB (a new log starts; the bench run's log is
-the previous one). QGroundControl → Analyze Tools → Log Download: download
-the log whose time covers the bench run into `~/rtk_sessions/<today>/`.
-
-Copy the run from the Jetson. In a terminal on the **lab PC** (replace `05`):
+First copy the run from the Jetson, while it is still powered. In a terminal
+on the **lab PC** (replace `05`):
 
 ```bash
 NUMBER=05
@@ -346,13 +364,19 @@ rsync -a --exclude .current_run homebrew${NUMBER}_me:homebrew_docker/logs/rtk_ru
 ls logs/rtk_runs/
 ```
 
-Copy the downloaded `.ulg` into the bench run's directory (the one ending
-`_xrce_bench`), then analyze it. On the **lab PC** (replace the run name and
-log file):
+The ULog is closed only at shutdown (`SDLOG_MODE` 2), and these logs are too
+big to download over the telemetry radio in reasonable time, so they come off
+the SD card. Unplug the battery, take out the FCU's SD card, and copy the
+newest `.ulg` from its `log/<date>/` folder (named by UTC time; it covers the
+bench run) into `~/rtk_sessions/<today>/` on the lab PC. Put the card back.
+
+Copy that `.ulg` into the bench run's directory (the one ending
+`_xrce_bench`), then analyze it. On the **lab PC** (replace the log file and
+run name):
 
 ```bash
 cd ~/homebrew_docker
-cp ~/rtk_sessions/$(date +%F)/log_12_2026-11-2-14-05-10.ulg logs/rtk_runs/20261102T190000Z_xrce_bench/
+cp ~/rtk_sessions/$(date +%F)/19_05_10.ulg logs/rtk_runs/20261102T190000Z_xrce_bench/
 python3 rtk_test/analyze_run.py logs/rtk_runs/20261102T190000Z_xrce_bench --tap ~/rtk_sessions/$(date +%F)/tap
 ```
 
@@ -362,8 +386,8 @@ inside PX4) found every chunk.
 
 ## 5. Flight run
 
-Unplug USB. Battery in, QGroundControl on the telemetry radio, wait for RTK
-Fixed in the GPS indicator. On the **Jetson**:
+Battery in, QGroundControl on the telemetry radio, wait for RTK Fixed in the
+GPS indicator. On the **Jetson**:
 
 ```bash
 cd ~/homebrew_docker
@@ -384,25 +408,27 @@ cd ~/homebrew_docker
 sudo bash rtk_test/record_run.sh stop
 ```
 
-Then, as in 4.5: quit QGroundControl, FCU on USB, take the closing snapshot
-on the **lab PC**:
+Before powering off, in QGroundControl → Analyze Tools → MAVLink Console:
 
-```bash
-cd ~/homebrew_docker
-python3 rtk_test/px4_console.py snapshot --device /dev/ttyACM0 --out ~/rtk_sessions/$(date +%F)/px4_after.txt
+```text
+perf
 ```
 
-Unplug the battery, download the flight's `.ulg` (QGroundControl, USB),
-`rsync` the runs, copy the `.ulg` into the `_xrce_flight1` directory, and run
+Copy its `uavcan: gnss: rtcm stream pub failed` line (chunks PX4 failed to
+send toward the Here4 over CAN; it is not in the ULog) into
+`~/rtk_sessions/<today>/perf.txt` on the lab PC.
+
+Then as in 4.5: `rsync` the runs while the Jetson is powered, unplug the
+battery, copy the flight's `.ulg` off the SD card into the `_xrce_flight1`
+directory, and run
 `analyze_run.py` on it with the same `--tap`. Stop `caster_tap.py` (Ctrl-C)
 at the end of the session.
 
 ## 6. Results for the PX4 developers
 
 Each run's `analysis/` holds `report.md` (paste into the PR, with the PNGs),
-`report.html` and `summary.json`. Attach `px4_before.txt` and `px4_after.txt`
-from `~/rtk_sessions/<date>/` too. The `perf` section's `uavcan: gnss: rtcm
-stream pub failed` count (chunks lost toward CAN) is only there.
+`report.html` and `summary.json`. Add the `perf` line from
+`~/rtk_sessions/<date>/perf.txt`: the CAN send-failure count is only there.
 
 To compare against MAVROS, record MAVROS runs on the same firmware at the same
 place, interleaved with XRCE ones (MAVROS settings in main README 8.1, then
