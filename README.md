@@ -67,7 +67,8 @@ python3 -m pip install --user pymavlink pyulog numpy matplotlib
 
 ### 1.2 Build the PX4 firmware
 
-Once, or after `PX4_FIRMWARE_REF` changes. It uses a separate checkout so the
+Once, or after the PR gets new commits. It clones the PR's branch,
+`dakejahl/dds-rtcm-corrections` in PX4/PX4-Autopilot. It uses a separate checkout so the
 SITL one in `~/autonomy_park_sitl` is untouched, and PX4's own build container
 so the compiler is the one PX4 expects. The board is the CubeOrange (from the
 main README); the first console snapshot ([3.4](#34-check-the-flight-controller-from-the-lab-pc))
@@ -76,14 +77,18 @@ prints the hardware to confirm it.
 In a terminal on the **lab PC**:
 
 ```bash
-git clone https://github.com/PX4/PX4-Autopilot.git ~/px4_pr29368
+git clone --branch dakejahl/dds-rtcm-corrections https://github.com/PX4/PX4-Autopilot.git ~/px4_pr29368
 cd ~/px4_pr29368
-git fetch origin 4dfcb7b4370ec7e03471038e821578d5794ec738
-git checkout 4dfcb7b4370ec7e03471038e821578d5794ec738
+git rev-parse HEAD
 git submodule update --init --recursive
 ./Tools/docker_run.sh "make cubepilot_cubeorange_default"
 ls build/cubepilot_cubeorange_default/*.px4
 ```
+
+`git rev-parse HEAD` must print `4dfcb7b4370ec7e03471038e821578d5794ec738`,
+the `PX4_FIRMWARE_REF` the image's `px4_msgs` is built from. If the branch has
+moved on, update `PX4_FIRMWARE_REF` in `docker/Dockerfile` to the new commit,
+push, and rebuild the image (3.2) so the two match.
 
 ## 2. Flight controller
 
@@ -233,9 +238,8 @@ off, outdoors with open sky, base station running, QGroundControl connected
 The test only proves something if XRCE is the sole path:
 
 - MAVROS is off (3.3) and TELEM2 speaks no MAVLink (2.2).
-- QGroundControl → Application Settings → RTK: **no RTK base and NTRIP
-  disabled**. QGroundControl can inject corrections over the telemetry radio
-  as MAVLink, which would mask a failure.
+- QGroundControl does not supply NTRIP corrections in this setup, so nothing
+  reaches PX4 as MAVLink `GPS_RTCM_DATA` over the telemetry radio either.
 
 ### 4.2 The caster tap (whole session)
 
@@ -324,7 +328,7 @@ sudo bash rtk_test/record_run.sh status
 ### 4.5 Analyze the bench run
 
 The ULog is closed only at shutdown (`SDLOG_MODE` 2). Unplug the battery,
-then plug the FCU into the lab PC by USB (a new log starts; the bench run's is
+then plug the FCU into the lab PC by USB (a new log starts; the bench run's log is
 the previous one). QGroundControl → Analyze Tools → Log Download: download
 the log whose time covers the bench run into `~/rtk_sessions/<today>/`.
 
