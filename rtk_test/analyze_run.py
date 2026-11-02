@@ -58,6 +58,12 @@ MAVLINK_TIMESYNC = 1
 CORRECTION_GAP_S = 5.0
 # Unmatched items this close to a comparison window's ends are edge effects
 EDGE_S = 2.0
+_PX4IO_FIX = ('4dfcb7b4370ec7e03471038e821578d5794ec738',
+              'cherry-picks of PX4 #29044 and #29542 (px4io.cpp only)')
+PATCHED_BUILDS = {
+    '8822b1dd2e254e25b38539be498efcc6c910f03a': _PX4IO_FIX,
+    'bdd696ce74caa3af56cc6174553eef3d3a375b3a': _PX4IO_FIX,
+}
 
 
 # ---------------------------------------------------------------- RTCM3 frames
@@ -552,6 +558,11 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
             ref = dict(ln.strip().split('=', 1) for ln in open(build) if '=' in ln).get('PX4_FIRMWARE_REF', '')
             sw = info.get('ver_sw') or ''
             s['px4']['matches_px4_msgs_build'] = bool(ref and sw and (ref.startswith(sw) or sw.startswith(ref)))
+            base = PATCHED_BUILDS.get(sw)
+            if not s['px4']['matches_px4_msgs_build'] and base and ref.startswith(base[0]):
+                s['px4']['matches_px4_msgs_build'] = True
+                s['px4']['patched_build'] = {'base': base[0], 'patches': base[1]}
+                warn(f'PX4 build {sw[:12]} is {base[0][:12]} + {base[1]}; msg/ unchanged, so px4_msgs still match.')
             if not s['px4']['matches_px4_msgs_build']:
                 warn(f'PX4 build {sw[:12]} is not the commit px4_msgs was generated from ({ref[:12]}).')
         if ulog.dropouts:
@@ -585,7 +596,8 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
                 clock.sign = sign
                 wall = clock.to_wall(hop3_px4_t)
                 idx = np.searchsorted(hop2_t, wall) - 1
-                ok = idx >= 0
+                # Only chunks inside the bag's span: the ULog covers the whole boot
+                ok = (idx >= 0) & (wall <= hop2_t[-1] + 1.0)
                 lag = wall[ok] - hop2_t[idx[ok]]
                 if len(lag) and 0 <= np.median(lag) < 1.0:
                     break
