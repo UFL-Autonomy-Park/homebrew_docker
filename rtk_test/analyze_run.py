@@ -561,8 +561,9 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
         clock = ClockMap(ulog, DDS_TIMESYNC if mode == 'xrce' else MAVLINK_TIMESYNC)
         insts = ulog_rtcm_instances(ulog)
         if not insts:
-            warn('PX4 log has no rtcm_corrections: logger_topics.txt was not active '
-                 '(px4_console.py install-logger-topics, then reboot).')
+            warn('PX4 log has no rtcm_corrections: logger_topics.txt was not active (README 2.4), '
+                 'or the logger ran out of subscriptions ("Too many subscriptions" in the boot '
+                 'log; lower SDLOG_PROFILE).')
         s['px4']['rtcm_instances'] = {str(k): {'chunks': len(v), 'device_ids': sorted({d for _, d, _ in v}),
                                                'bytes': sum(len(p) for _, _, p in v)} for k, v in insts.items()}
         if mode == 'xrce':
@@ -624,7 +625,7 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
 
         msgs = [(m.timestamp / 1e6, m.log_level_str(), m.message) for m in ulog.logged_messages]
         if mode == 'xrce':
-            dds_sessions(s, msgs, hop3_raw, clock, load_events(run))
+            dds_sessions(s, msgs, hop3_raw, clock, load_events(run), window)
         lost = [m for m in msgs if 'rtcm_corrections lost' in m[2]]
         s['px4']['rtcm_lost_warnings'] = len(lost)
         s['px4']['messages'] = [f'{t:.1f}s {lvl} {txt}' for t, lvl, txt in msgs
@@ -648,7 +649,7 @@ def analyze(run, ulog_path, tap_dir, device_id, criteria):
     return s
 
 
-def dds_sessions(s, msgs, hop3_raw, clock, events):
+def dds_sessions(s, msgs, hop3_raw, clock, events, window=None):
     """DDS session drops and the correction losses they explain (XRCE runs).
 
     PX4's client logs "No ping response" / "session disconnected" when it loses
@@ -656,7 +657,12 @@ def dds_sessions(s, msgs, hop3_raw, clock, events):
     Chunks published while the session is down are dropped (nothing buffers
     them); losses inside a correction outage at PX4 that contains a
     disconnect are attributed to it, everything else stays unexplained.
+    Only disconnects inside the run's window count: the ULog spans the whole
+    boot, including powering down after the run.
     """
+    if clock.valid and window:
+        lo, hi = window
+        msgs = [m for m in msgs if lo - EDGE_S <= float(clock.to_wall(m[0])) <= hi + EDGE_S]
     downs, ups = [], []
     for t, _, text in msgs:
         if 'No ping response' in text or 'session disconnected' in text:
