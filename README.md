@@ -160,8 +160,7 @@ reboot
 ```
 
 `mkdir` reports an error for a directory that already exists; that is fine.
-`cat` must print the 13 lines. [3.4](#34-check-the-flight-controller) checks
-that PX4 read the file.
+`cat` must print the 13 lines.
 
 ## 3. Jetson
 
@@ -242,12 +241,17 @@ ver all
 param show SDLOG_MODE
 param show UAVCAN_PUB_RTCM
 param show UXRCE_DDS_CFG
-dmesg
+cat /fs/microsd/etc/logging/logger_topics.txt
 ```
 
-Expect: the CubeOrange as `HW arch`, an `FW git-hash` starting `4dfcb7b4`,
-`SDLOG_MODE` 2, `UAVCAN_PUB_RTCM` 1, `UXRCE_DDS_CFG` 102 (TELEM 2), and in
-`dmesg` a line `logging N topics from logger_topics.txt`.
+Expect: `HW arch: CUBEPILOT_CUBEORANGE`, `PX4 git-hash:
+4dfcb7b4370ec7e03471038e821578d5794ec738`, `SDLOG_MODE` 2,
+`UAVCAN_PUB_RTCM` 1, `UXRCE_DDS_CFG` 102 (TELEM 2), and the 13 lines from 2.4.
+
+`dmesg` cannot show whether PX4 read the file: its buffer is small and the
+boot messages are gone by the time the console opens. The bench analysis (4.5)
+shows it instead: without the file, hop 3 (`rtcm_corrections` inside PX4) is
+INCOMPLETE.
 
 ## 4. Bench gate: RTK fixed over XRCE
 
