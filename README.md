@@ -42,13 +42,23 @@ the image):
 
 | What | Where | Pinned to |
 |---|---|---|
-| PX4 firmware on the FCU | built on the lab PC, [step 2](#2-flight-controller) | `4dfcb7b4` |
+| PX4 firmware on the FCU | built on the lab PC, [1.2](#12-build-the-px4-firmware) | `4dfcb7b4` + PX4 #29044 and #29542 = `8822b1dd` |
 | `px4_msgs` in the image | `docker/Dockerfile` (`PX4_FIRMWARE_REF`) | `4dfcb7b4` |
 | Micro XRCE-DDS Agent | `docker/Dockerfile` | v2.4.3 |
 
 The message definitions in the image must match the firmware's, or DDS topics
 silently fail to deserialize. `analyze_run.py` compares the two and reports a
 mismatch.
+
+The firmware also carries two fixes cherry-picked from PX4 main, because
+`px4io` at `4dfcb7b4` hangs in `init()` (a two-register read into a
+two-byte variable): no RC input, no MAIN outputs, and the ESCs chirp their
+"no signal" tone. #29044 (`626c806a`) and #29542 (`56027620`) change only
+`src/drivers/px4io/px4io.cpp`, not `msg/`, so `px4_msgs` built from
+`4dfcb7b4` still match. With the committer pinned as in 1.2 the result is
+always `8822b1dd2e254e25b38539be498efcc6c910f03a`; `analyze_run.py` knows it
+(and `bdd696ce`, the same tree cherry-picked unpinned for the 2026-11-02
+flight) as `4dfcb7b4` plus these fixes.
 
 ## 1. Lab PC (ground station)
 
@@ -79,15 +89,21 @@ In a terminal on the **lab PC**:
 ```bash
 git clone --branch dakejahl/dds-rtcm-corrections https://github.com/PX4/PX4-Autopilot.git ~/px4_pr29368
 cd ~/px4_pr29368
+git checkout -b rtk-test-px4io-fix 4dfcb7b4370ec7e03471038e821578d5794ec738
+git fetch origin 626c806aca5e3639fee02641c35eaf1243ba20e4 560276208191cb9312180f20b1399e17bfcf7f53
+GIT_COMMITTER_NAME=rtk_tests GIT_COMMITTER_EMAIL=rtk_tests@invalid GIT_COMMITTER_DATE=2026-11-02T00:00:00Z git cherry-pick -x 626c806aca5e3639fee02641c35eaf1243ba20e4 560276208191cb9312180f20b1399e17bfcf7f53
 git rev-parse HEAD
+git diff 4dfcb7b4370ec7e03471038e821578d5794ec738 --stat
 git submodule update --init --recursive
 ./Tools/docker_run.sh "make cubepilot_cubeorange_default"
 ls build/cubepilot_cubeorange_default/*.px4
 ```
 
-`git rev-parse HEAD` must print `4dfcb7b4370ec7e03471038e821578d5794ec738`,
-the `PX4_FIRMWARE_REF` the image's `px4_msgs` is built from. If the branch has
-moved on, update `PX4_FIRMWARE_REF` in `docker/Dockerfile` to the new commit,
+`git rev-parse HEAD` must print `8822b1dd2e254e25b38539be498efcc6c910f03a`
+(the PR head `4dfcb7b4`, the `PX4_FIRMWARE_REF` the image's `px4_msgs` is
+built from, plus the two `px4io` fixes; see [Versions](#versions)), and the
+`--stat` must list only `src/drivers/px4io/px4io.cpp`. If the PR has moved
+on, update `PX4_FIRMWARE_REF` in `docker/Dockerfile` to the new commit,
 push, and rebuild the image (3.2) so the two match.
 
 ## 2. Flight controller
@@ -245,7 +261,7 @@ cat /fs/microsd/etc/logging/logger_topics.txt
 ```
 
 Expect: `HW arch: CUBEPILOT_CUBEORANGE`, `PX4 git-hash:
-4dfcb7b4370ec7e03471038e821578d5794ec738`, `SDLOG_MODE` 2,
+8822b1dd2e254e25b38539be498efcc6c910f03a`, `SDLOG_MODE` 2,
 `UAVCAN_PUB_RTCM` 1, `UXRCE_DDS_CFG` 102 (TELEM 2), and the 13 lines from 2.4.
 
 `dmesg` cannot show whether PX4 read the file: its buffer is small and the
