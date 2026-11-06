@@ -127,7 +127,7 @@ the radio wakes, which adds delay and bursts to everything sent **to** the
 vehicle: commands, setpoints, RTK corrections and discovery. On a vehicle the
 Wi-Fi radio's power is negligible next to the motors. This file overrides the
 default (files in `conf.d` load in name order, later ones win) and takes
-effect at the reboot in 1.9:
+effect at the reboot in 1.10:
 
 ```bash
 printf '[connection]\nwifi.powersave = 2\n' | sudo tee /etc/NetworkManager/conf.d/zz-wifi-powersave-off.conf
@@ -156,7 +156,7 @@ in its first few updates after boot; afterwards it slews it gradually instead
 of jumping it. The full guide, including the server and how to undo
 everything, is [docs/TIME_SYNC.md](docs/TIME_SYNC.md).
 
-Installing chrony removes `systemd-timesyncd` (the two packages conflict):
+Installing chrony removes `systemd-timesyncd` (the two packages conflict; this won't be required once the lab goes to Ubuntu 26.04):
 
 ```bash
 sudo apt-get install -y chrony
@@ -168,7 +168,80 @@ chronyc sources
 
 The `192.168.1.201` line should start with `^*` (selected source).
 
-### 1.9 Reboot
+### 1.9 Lock the CPU clocks
+
+By default the Jetson raises and lowers its clocks with the load. A control
+loop that wakes every 20 ms looks like a light load, so the CPUs idle at a low
+clock and must speed up each time it wakes. In the 2026-11-06 runs of
+`apark_rise_controller` on a Jetson, every core was at 729.6 MHz, about half
+of the 1510.4 MHz maximum, when control ticks overran (exit 52,
+`CONTROL_TICK_LATE`). `jetson_clocks` pins the CPU, GPU and memory clocks at
+the maximum of the current power mode. The cost is a few watts and some heat,
+negligible next to the motors.
+
+`jetson_clocks` locks at the current power mode's maximum, so the power mode
+must be the highest one: `15W` (ID 0) on the Orin Nano 8 GB under JetPack 6.0.
+The power mode survives reboots. Check it:
+
+```bash
+sudo nvpmodel -q
+grep POWER_MODEL /etc/nvpmodel.conf
+```
+
+`nvpmodel -q` must name the highest-power mode that `grep` lists. If it does
+not, set it with that mode's ID (it may ask to reboot; answer yes and SSH back
+in, 1.1):
+
+```bash
+sudo nvpmodel -m 0
+```
+
+`jetson_clocks` itself does not survive a reboot. This systemd unit runs it at
+every boot, after the power mode is applied:
+
+```bash
+sudo tee /etc/systemd/system/jetson-clocks.service > /dev/null <<'UNIT'
+[Unit]
+Description=Lock the Jetson clocks at the power mode's maximum
+After=nvpmodel.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/jetson_clocks
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+sudo systemctl daemon-reload
+sudo systemctl enable --now jetson-clocks.service
+```
+
+Check that every CPU's minimum clock now equals its maximum (`min` and `max`
+equal on every line):
+
+```bash
+for c in /sys/devices/system/cpu/cpu[0-9]*/cpufreq; do
+  echo "$(basename "$(dirname "$c")"): cur $(cat "$c/scaling_cur_freq") min $(cat "$c/scaling_min_freq") max $(cat "$c/cpuinfo_max_freq")"
+done
+```
+
+`apark_rise_controller` records in every run's log whether the clocks were
+locked (`summary.txt` and the first event in `ticks.csv`), so a Jetson
+without the lock shows up after the flight.
+
+> [!NOTE]
+> Changing the power mode later resets the clocks. Lock them again afterwards:
+> ```bash
+> sudo systemctl restart jetson-clocks.service
+> ```
+> To undo the lock, disable the unit and reboot:
+> ```bash
+> sudo systemctl disable --now jetson-clocks.service
+> sudo reboot
+> ```
+
+### 1.10 Reboot
 
 > [!CAUTION]
 > **Reboot now**, so the hostname and the Wi-Fi setting apply everywhere. Your
@@ -184,12 +257,13 @@ After you SSH back in:
 hostname
 /sbin/iw dev wlan0 get power_save
 chronyc tracking | grep -E "Reference ID|Stratum|System time"
+systemctl is-active jetson-clocks.service
 ```
 
-Expect `homebrew-jetson-05` (with your number), `Power save: off`, and a
-`Reference ID` of `C0A801C9 (192.168.1.201)`.
+Expect `homebrew-jetson-05` (with your number), `Power save: off`, a
+`Reference ID` of `C0A801C9 (192.168.1.201)`, and `active`.
 
-### 1.10 Update the router IP reservation
+### 1.11 Update the router IP reservation
 
 Log in to the router and fix the IP address. Log this in the IP reservations
 document in the Autonomy Park Google Drive.
